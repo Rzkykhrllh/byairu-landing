@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { Canvas, extend, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Environment, Lightformer, RoundedBox } from '@react-three/drei';
 import {
@@ -14,7 +14,7 @@ import {
 } from '@react-three/rapier';
 import { MeshLineGeometry, MeshLineMaterial } from 'meshline';
 import { makeTextures, FACE_ASPECT, type CardTextures } from '../lib/faces';
-import { resolveAvatarMode, type Side } from '../config';
+import type { Side } from '../config';
 
 extend({ MeshLineGeometry, MeshLineMaterial });
 
@@ -28,28 +28,41 @@ declare global {
   }
 }
 
-// Holder and card dimensions in world units (mirrors the prototype: 232x360 holder, 212x316 card).
+// ---- dimensions (world units) ----
 const HOLDER_W = 1.6;
 const HOLDER_H = 2.48;
-const HOLDER_D = 0.045;
+const HOLDER_D = 0.04;
 const FACE_W = 1.462;
 const FACE_H = FACE_W / FACE_ASPECT;
 const FACE_Y = -0.0825;
 const SLOT_Y = 1.123;
 
-/** Lets the page (links under the card) and the 3D scene talk to each other. */
-export const sideEvents = {
-  emit(side: Side) {
-    window.dispatchEvent(new CustomEvent('lanyard:side', { detail: side }));
-  },
-};
+// ---- lanyard shape ----
+// Two straps come down from the neck (left and right) and meet at a metal clip above the card.
+const TOP_Y = 4.6; // where the straps leave the top of the screen
+const NECK = 0.55; // half the gap between the two straps at the top
+const SEG = 1.08; // max length between rope points
+const STRAP_W = 0.3;
+const CLIP_DROP = 0.18; // clip centre to card anchor
+
+// ---- feel ----
+// A light plastic badge: low gravity scale, little damping on the card, a bit more on the strap.
+const GRAVITY = -22;
+const STRAP_DAMP = 2.2;
+const CARD_LIN_DAMP = 0.9;
+const CARD_ANG_DAMP = 1.4;
+const FLIP_STIFF = 0.32; // how hard the card turns towards the chosen side
+const FLIP_DAMP = 0.9; // keeps the turn from overshooting
+
+type Body = RapierRigidBody & { lerped?: THREE.Vector3 };
+type Ref = MutableRefObject<Body>;
 
 export default function Lanyard() {
   const [tex, setTex] = useState<CardTextures | null>(null);
 
   useEffect(() => {
     let alive = true;
-    makeTextures(resolveAvatarMode()).then((t) => {
+    makeTextures().then((t) => {
       if (!alive) return;
       setTex(t);
       document.documentElement.classList.add('has-3d');
@@ -73,8 +86,8 @@ export default function Lanyard() {
       <Responsive />
       <ambientLight intensity={Math.PI * 0.85} />
       <directionalLight position={[3, 5, 6]} intensity={0.6} />
-      <Physics gravity={[0, -40, 0]} timeStep={1 / 60}>
-        <Band tex={tex} />
+      <Physics gravity={[0, GRAVITY, 0]} timeStep={1 / 60}>
+        <Badge tex={tex} />
       </Physics>
       <Environment resolution={256}>
         <group rotation={[-Math.PI / 3, 0, 1]}>
@@ -99,26 +112,50 @@ function Responsive() {
   return null;
 }
 
-type Segment = RapierRigidBody & { lerped?: THREE.Vector3 };
-
-function Band({ tex, maxSpeed = 50, minSpeed = 10 }: { tex: CardTextures; maxSpeed?: number; minSpeed?: number }) {
-  const band = useRef<any>(null);
-  const fixed = useRef<Segment>(null!);
-  const j1 = useRef<Segment>(null!);
-  const j2 = useRef<Segment>(null!);
-  const j3 = useRef<Segment>(null!);
-  const card = useRef<RapierRigidBody>(null!);
-
-  const tmp = useMemo(
-    () => ({ vec: new THREE.Vector3(), dir: new THREE.Vector3(), ang: new THREE.Vector3(), q: new THREE.Quaternion(), e: new THREE.Euler() }),
-    [],
-  );
-  const { width, height } = useThree((s) => s.size);
+/** One strap: fixed top -> two free points -> clip, drawn as a textured ribbon. */
+function useStrap(top: Ref, a: Ref, b: Ref, clip: Ref) {
+  useRopeJoint(top, a, [[0, 0, 0], [0, 0, 0], SEG]);
+  useRopeJoint(a, b, [[0, 0, 0], [0, 0, 0], SEG]);
+  useRopeJoint(b, clip, [[0, 0, 0], [0, 0, 0], SEG]);
   const [curve] = useState(() => {
     const c = new THREE.CatmullRomCurve3([new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]);
     c.curveType = 'chordal';
     return c;
   });
+  return curve;
+}
+
+function smooth(ref: Ref, delta: number) {
+  const body = ref.current;
+  const t = body.translation() as THREE.Vector3;
+  if (!body.lerped) body.lerped = new THREE.Vector3().copy(t);
+  const d = Math.max(0.1, Math.min(1, body.lerped.distanceTo(t)));
+  // clamp so a slow frame can never overshoot and blow the curve up
+  body.lerped.lerp(t, Math.min(1, delta * (12 + d * 38)));
+  return body.lerped;
+}
+
+function Badge({ tex }: { tex: CardTextures }) {
+  const bandL = useRef<any>(null);
+  const bandR = useRef<any>(null);
+  const topL = useRef<Body>(null!);
+  const topR = useRef<Body>(null!);
+  const l1 = useRef<Body>(null!);
+  const l2 = useRef<Body>(null!);
+  const r1 = useRef<Body>(null!);
+  const r2 = useRef<Body>(null!);
+  const clip = useRef<Body>(null!);
+  const card = useRef<Body>(null!);
+
+  const curveL = useStrap(topL, l1, l2, clip);
+  const curveR = useStrap(topR, r1, r2, clip);
+  useSphericalJoint(clip, card, [[0, -CLIP_DROP / 2, 0], [0, HOLDER_H / 2 + CLIP_DROP / 2, 0]]);
+
+  const tmp = useMemo(
+    () => ({ vec: new THREE.Vector3(), dir: new THREE.Vector3(), q: new THREE.Quaternion(), e: new THREE.Euler() }),
+    [],
+  );
+  const { width, height } = useThree((s) => s.size);
 
   const [dragged, setDragged] = useState<THREE.Vector3 | false>(false);
   const [hovered, setHovered] = useState(false);
@@ -131,12 +168,7 @@ function Band({ tex, maxSpeed = 50, minSpeed = 10 }: { tex: CardTextures; maxSpe
   const lastPeek = useRef(0);
   const pressAt = useRef<{ x: number; y: number } | null>(null);
 
-  const segmentProps: RigidBodyProps = { type: 'dynamic', canSleep: true, colliders: false, angularDamping: 4, linearDamping: 4 };
-
-  useRopeJoint(fixed, j1, [[0, 0, 0], [0, 0, 0], 1]);
-  useRopeJoint(j1, j2, [[0, 0, 0], [0, 0, 0], 1]);
-  useRopeJoint(j2, j3, [[0, 0, 0], [0, 0, 0], 1]);
-  useSphericalJoint(j3, card, [[0, 0, 0], [0, HOLDER_H / 2 + 0.06, 0]]);
+  const strapBody: RigidBodyProps = { type: 'dynamic', canSleep: true, colliders: false, angularDamping: STRAP_DAMP, linearDamping: STRAP_DAMP };
 
   const turnTo = (s: Side) => {
     target.current = s === 'frame' ? Math.PI : 0;
@@ -145,7 +177,7 @@ function Band({ tex, maxSpeed = 50, minSpeed = 10 }: { tex: CardTextures; maxSpe
     card.current?.wakeUp();
   };
 
-  // links under the card can turn it
+  // the links under the card can turn it
   useEffect(() => {
     const onSet = (e: Event) => turnTo((e as CustomEvent<Side>).detail);
     window.addEventListener('lanyard:set', onSet);
@@ -161,59 +193,62 @@ function Band({ tex, maxSpeed = 50, minSpeed = 10 }: { tex: CardTextures; maxSpe
   }, [hovered, dragged]);
 
   useFrame((state, delta) => {
-    const { vec, dir, ang, q, e } = tmp;
+    const { vec, dir, q, e } = tmp;
+    if (!card.current || !clip.current) return;
+
     if (dragged) {
       vec.set(state.pointer.x, state.pointer.y, 0.5).unproject(state.camera);
       dir.copy(vec).sub(state.camera.position).normalize();
       vec.add(dir.multiplyScalar(state.camera.position.length()));
-      [card, j1, j2, j3, fixed].forEach((r) => r.current?.wakeUp());
-      card.current?.setNextKinematicTranslation({ x: vec.x - dragged.x, y: vec.y - dragged.y, z: vec.z - dragged.z });
+      [card, clip, l1, l2, r1, r2].forEach((r) => r.current?.wakeUp());
+      card.current.setNextKinematicTranslation({ x: vec.x - dragged.x, y: vec.y - dragged.y, z: 0 });
     }
-    if (!fixed.current || !card.current) return;
 
-    // smooth the two middle joints to kill jitter, then rebuild the strap curve
-    [j1, j2].forEach((ref) => {
-      const seg = ref.current;
-      if (!seg.lerped) seg.lerped = new THREE.Vector3().copy(seg.translation() as THREE.Vector3);
-      const d = Math.max(0.1, Math.min(1, seg.lerped.distanceTo(seg.translation() as THREE.Vector3)));
-      // clamp: on a slow frame the factor could exceed 1 and blow the curve up
-      seg.lerped.lerp(seg.translation() as THREE.Vector3, Math.min(1, delta * (minSpeed + d * (maxSpeed - minSpeed))));
-    });
-    curve.points[0].copy(j3.current.translation() as THREE.Vector3);
-    curve.points[1].copy(j2.current.lerped!);
-    curve.points[2].copy(j1.current.lerped!);
-    curve.points[3].copy(fixed.current.translation() as THREE.Vector3);
-    band.current.geometry.setPoints(curve.getPoints(32));
+    // rebuild both strap ribbons
+    const c = clip.current.translation() as THREE.Vector3;
+    curveL.points[0].copy(topL.current.translation() as THREE.Vector3);
+    curveL.points[1].copy(smooth(l1, delta));
+    curveL.points[2].copy(smooth(l2, delta));
+    curveL.points[3].copy(c);
+    curveR.points[0].copy(topR.current.translation() as THREE.Vector3);
+    curveR.points[1].copy(smooth(r1, delta));
+    curveR.points[2].copy(smooth(r2, delta));
+    curveR.points[3].copy(c);
+    bandL.current.geometry.setPoints(curveL.getPoints(32));
+    bandR.current.geometry.setPoints(curveR.getPoints(32));
 
-    // spring the card's yaw towards the chosen side
+    // turn the card towards the chosen side with a damped spring on its yaw,
+    // and let pitch / roll settle so the card hangs flat towards the viewer
     const r = card.current.rotation();
     q.set(r.x, r.y, r.z, r.w);
     e.setFromQuaternion(q, 'YXZ');
     let err = target.current - e.y;
     err = Math.atan2(Math.sin(err), Math.cos(err));
-    ang.copy(card.current.angvel() as THREE.Vector3);
+    const ang = card.current.angvel();
+    let wy = ang.y * FLIP_DAMP + err * FLIP_STIFF;
 
-    // subtle cue: until the first flip, the card turns slightly every so often
+    // subtle cue: until the first flip, the card turns a little every now and then
     const now = performance.now();
     if (!flippedOnce.current && !dragged && now - lastActivity.current > 2500 && now - lastPeek.current > 11000) {
       lastPeek.current = now;
-      ang.y += 3.4;
-      card.current.wakeUp();
+      wy += 2.4;
     }
-    card.current.setAngvel({ x: ang.x, y: ang.y + err * 0.2, z: ang.z }, true);
+    card.current.setAngvel({ x: ang.x * 0.96 - e.x * 0.08, y: wy, z: ang.z * 0.96 }, true);
 
-    // which side is facing the viewer
     const facing: Side = Math.cos(e.y) >= 0 ? 'dev' : 'frame';
     if (facing !== sideRef.current) {
       sideRef.current = facing;
       setSide(facing);
-      sideEvents.emit(facing);
+      window.dispatchEvent(new CustomEvent('lanyard:side', { detail: facing }));
     }
   });
 
   const strap = side === 'dev' ? tex.strapDev : tex.strapFrame;
+  // repeat the woven label along the strap without stretching it
+  const strapRepeat = useMemo(() => [-(SEG * 3) / (STRAP_W * strap.aspect), 1], [strap]);
 
   const onDown = (ev: ThreeEvent<PointerEvent>) => {
+    ev.stopPropagation();
     (ev.target as Element).setPointerCapture?.(ev.pointerId);
     pressAt.current = { x: ev.clientX, y: ev.clientY };
     lastActivity.current = performance.now();
@@ -229,22 +264,55 @@ function Band({ tex, maxSpeed = 50, minSpeed = 10 }: { tex: CardTextures; maxSpe
   };
 
   const plastic = { roughness: 0.45, clearcoat: 1, clearcoatRoughness: 0.12, envMapIntensity: 0.35 };
+  const metal = { color: '#d3d7db', metalness: 0.55, roughness: 0.32 };
+
+  // Start every body where it would hang at rest, so the page opens calm instead of with a drop.
+  const clipY = -SEG * 2.85;
+  const cardY = clipY - CLIP_DROP - HOLDER_H / 2;
+  const strapX = (k: number) => NECK * (1 - k / 3);
+  const strapY = (k: number) => (clipY * k) / 3;
 
   return (
     <>
-      <group position={[0, 4, 0]}>
-        <RigidBody ref={fixed} {...segmentProps} type="fixed" />
-        <RigidBody position={[0.5, 0, 0]} ref={j1} {...segmentProps}>
-          <BallCollider args={[0.1]} />
+      <group position={[0, TOP_Y, 0]}>
+        <RigidBody ref={topL} {...strapBody} type="fixed" position={[-NECK, 0, 0]} />
+        <RigidBody ref={topR} {...strapBody} type="fixed" position={[NECK, 0, 0]} />
+        <RigidBody ref={l1} {...strapBody} position={[-strapX(1), strapY(1), 0]}>
+          <BallCollider args={[0.08]} density={4} />
         </RigidBody>
-        <RigidBody position={[1, 0, 0]} ref={j2} {...segmentProps}>
-          <BallCollider args={[0.1]} />
+        <RigidBody ref={l2} {...strapBody} position={[-strapX(2), strapY(2), 0]}>
+          <BallCollider args={[0.08]} density={4} />
         </RigidBody>
-        <RigidBody position={[1.5, 0, 0]} ref={j3} {...segmentProps}>
-          <BallCollider args={[0.1]} />
+        <RigidBody ref={r1} {...strapBody} position={[strapX(1), strapY(1), 0]}>
+          <BallCollider args={[0.08]} density={4} />
         </RigidBody>
-        <RigidBody position={[2, 0, 0]} ref={card} {...segmentProps} type={dragged ? 'kinematicPosition' : 'dynamic'}>
-          <CuboidCollider args={[HOLDER_W / 2, HOLDER_H / 2, HOLDER_D / 2]} />
+        <RigidBody ref={r2} {...strapBody} position={[strapX(2), strapY(2), 0]}>
+          <BallCollider args={[0.08]} density={4} />
+        </RigidBody>
+
+        {/* metal clip where the two straps meet */}
+        <RigidBody ref={clip} {...strapBody} position={[0, clipY, 0]}>
+          <BallCollider args={[0.08]} density={4} />
+          <mesh position={[0, 0.02, 0]}>
+            <boxGeometry args={[0.2, 0.1, 0.05]} />
+            <meshStandardMaterial {...metal} />
+          </mesh>
+          <mesh position={[0, -0.08, 0]} rotation={[0, Math.PI / 2, 0]}>
+            <torusGeometry args={[0.055, 0.014, 10, 24]} />
+            <meshStandardMaterial {...metal} />
+          </mesh>
+        </RigidBody>
+
+        <RigidBody
+          ref={card}
+          type={dragged ? 'kinematicPosition' : 'dynamic'}
+          canSleep
+          colliders={false}
+          linearDamping={CARD_LIN_DAMP}
+          angularDamping={CARD_ANG_DAMP}
+          position={[0, cardY, 0]}
+        >
+          <CuboidCollider args={[HOLDER_W / 2, HOLDER_H / 2, HOLDER_D / 2]} density={0.35} />
           <group
             onPointerOver={() => setHovered(true)}
             onPointerOut={() => setHovered(false)}
@@ -272,26 +340,29 @@ function Band({ tex, maxSpeed = 50, minSpeed = 10 }: { tex: CardTextures; maxSpe
                 <meshBasicMaterial color="#050506" />
               </mesh>
             ))}
-            {/* metal ring through the slot */}
-            <mesh position={[0, SLOT_Y + 0.07, 0]} rotation={[0, Math.PI / 2, 0]}>
-              <torusGeometry args={[0.1, 0.017, 12, 32]} />
-              <meshStandardMaterial color="#b9bec3" metalness={1} roughness={0.25} />
+            {/* split ring through the slot, up to the clip */}
+            <mesh position={[0, SLOT_Y + 0.08, 0]} rotation={[0, Math.PI / 2, 0]}>
+              <torusGeometry args={[0.09, 0.014, 10, 28]} />
+              <meshStandardMaterial {...metal} />
             </mesh>
           </group>
         </RigidBody>
       </group>
-      <mesh ref={band} frustumCulled={false}>
-        <meshLineGeometry />
-        <meshLineMaterial
-          color="white"
-          depthTest={false}
-          resolution={[width, height]}
-          useMap
-          map={strap}
-          repeat={[-4, 1]}
-          lineWidth={0.42}
-        />
-      </mesh>
+
+      {[bandL, bandR].map((ref, i) => (
+        <mesh key={i} ref={ref} renderOrder={-1} frustumCulled={false}>
+          <meshLineGeometry />
+          <meshLineMaterial
+            color="white"
+            depthTest
+            resolution={[width, height]}
+            useMap
+            map={strap.tex}
+            repeat={strapRepeat}
+            lineWidth={STRAP_W}
+          />
+        </mesh>
+      ))}
     </>
   );
 }

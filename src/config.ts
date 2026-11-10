@@ -3,13 +3,17 @@
 export const SITES = {
   dev: {
     name: 'Rizky Khairullah',
+    nameJa: 'リズキ・ハイルッラー',
     role: 'Software Engineer',
+    roleJa: 'ソフトウェアエンジニア',
     url: 'https://dev.byairu.com',
     host: 'dev.byairu.com',
   },
   frame: {
     name: 'Airu.',
+    nameJa: 'アイル',
     role: 'Photographer',
+    roleJa: '写真家',
     url: 'https://frame.byairu.com',
     host: 'frame.byairu.com',
   },
@@ -18,24 +22,16 @@ export const SITES = {
 export type Side = keyof typeof SITES;
 
 /**
- * Avatar on the card.
- * - 'pixel' : pixel-art character (no photo needed)
- * - 'mono'  : monogram (>_ and A)
- * - 'image' : real photos from /public/avatar (falls back to 'pixel' if missing)
+ * Card photos. Drop the files in /public/avatar and they are used automatically.
+ * Until a file exists, the card shows an empty photo slot.
  *
- * Preview any mode without editing: add ?avatar=pixel | mono | image to the URL.
+ * focus: which point of the photo stays in frame, 0..1 from the left / top (0.5, 0.5 = center).
+ * zoom:  1 = fill the slot, 1.5 = crop in 50% tighter.
+ *
+ * dev   -> shown in colour, slot is close to square (132 x 142)
+ * frame -> shown in black and white, slot is wide (212 x 176)
  */
-export type AvatarMode = 'pixel' | 'mono' | 'image';
-
-export const AVATAR = {
-  mode: 'pixel' as AvatarMode,
-  images: {
-    dev: '/avatar/dev.jpg', // colour, portrait crop works best (about 132x142 ratio)
-    frame: '/avatar/frame.jpg', // shown in black and white, wide crop (about 212x176 ratio)
-  },
+export const PHOTOS = {
+  dev: { src: '/avatar/dev.jpg', focus: [0.5, 0.35] as [number, number], zoom: 1 },
+  frame: { src: '/avatar/frame.jpg', focus: [0.5, 0.4] as [number, number], zoom: 1 },
 };
-
-export function resolveAvatarMode(): AvatarMode {
-  const p = new URLSearchParams(window.location.search).get('avatar');
-  return p === 'pixel' || p === 'mono' || p === 'image' ? p : AVATAR.mode;
-}

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { AVATAR, SITES, type AvatarMode } from '../config';
+import { PHOTOS, SITES } from '../config';
 
 // Card faces are drawn in "card pixels" (212 x 316, the inner card of the holder)
 // and rendered at 1024px wide for a crisp texture.
@@ -26,16 +26,11 @@ const C = {
 const MONO = '"JetBrains Mono", ui-monospace, Menlo, monospace';
 const SERIF = '"Cormorant Garamond", Georgia, serif';
 const SANS = '"Inter Tight", "Helvetica Neue", Arial, sans-serif';
+// Japanese falls back to the system faces: gothic next to the mono side, mincho next to the serif side.
+const JA_GOTHIC = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif';
+const JA_MINCHO = '"Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif';
 
-// 12x12 pixel characters. Same person, two outfits.
-const PIX = {
-  dev: ['....hhhh....', '...hhhhhh...', '..hhhhhhhh..', '..hssssssh..', '..sggsggss..', '..sgesgess..', '..ssssssss..', '...ssmmss...', '....ssss....', '..tttttttt..', '.tttttttttt.', '.tttttttttt.'],
-  frame: ['...cccccc...', '..cccccccc..', '..hhhhhhhh..', '..hssssssh..', '..ssssssss..', '..sesssess..', '..ssssssss..', '...ssmmss...', '....ssss....', '..tttttttt..', '.tbbblllbbt.', '.tbbbbbbbbt.'],
-};
-const PAL: Record<'dev' | 'frame', Record<string, string>> = {
-  dev: { h: C.navy, s: '#c98b5e', g: C.purple, e: C.navy, m: '#8a4b33', t: C.amber },
-  frame: { c: C.ink, h: C.ink, s: '#c98b5e', e: C.ink, m: '#8a4b33', t: '#e9e7e2', b: '#2b2b2b', l: '#a3a3a3' },
-};
+type Photo = { img: HTMLImageElement; focus: [number, number]; zoom: number } | null;
 
 function makeCanvas(w: number, h: number) {
   const c = document.createElement('canvas');
@@ -54,32 +49,39 @@ function spaced(g: CanvasRenderingContext2D, text: string, x: number, y: number,
     g.fillText(ch, cx, y);
     cx += g.measureText(ch).width + sp;
   }
+  return width;
 }
 
-function drawPixels(g: CanvasRenderingContext2D, kind: 'dev' | 'frame', x: number, y: number, size: number) {
-  const cell = size / 12;
-  PIX[kind].forEach((row, ry) =>
-    [...row].forEach((ch, rx) => {
-      const col = PAL[kind][ch];
-      if (!col) return;
-      g.fillStyle = col;
-      // tiny overlap avoids hairline seams between cells
-      g.fillRect(x + rx * cell, y + ry * cell, cell + 0.05, cell + 0.05);
-    }),
-  );
-}
-
-function drawCover(g: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
-  const r = Math.max(w / img.width, h / img.height);
+/** Cover-fit a photo into a box, honouring the focus point and zoom from config. */
+function drawPhoto(g: CanvasRenderingContext2D, p: NonNullable<Photo>, x: number, y: number, w: number, h: number) {
+  const { img, focus, zoom } = p;
+  const r = Math.max(w / img.width, h / img.height) * zoom;
   const sw = w / r;
   const sh = h / r;
-  g.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, x, y, w, h);
+  const sx = Math.min(Math.max(img.width * focus[0] - sw / 2, 0), img.width - sw);
+  const sy = Math.min(Math.max(img.height * focus[1] - sh / 2, 0), img.height - sh);
+  g.drawImage(img, sx, sy, sw, sh, x, y, w, h);
 }
 
-function drawDev(mode: AvatarMode, img: HTMLImageElement | null) {
+/** Empty photo slot: a quiet tone with a focus mark, so the card still reads as finished. */
+function drawSlot(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, light: boolean) {
+  g.fillStyle = light ? '#eef1f5' : '#c9c6c0';
+  g.fillRect(x, y, w, h);
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  g.strokeStyle = light ? 'rgba(15,23,42,.22)' : 'rgba(255,255,255,.6)';
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(cx - 7, cy); g.lineTo(cx + 7, cy);
+  g.moveTo(cx, cy - 7); g.lineTo(cx, cy + 7);
+  g.stroke();
+}
+
+function drawDev(photo: Photo) {
   const c = makeCanvas(TW, TH);
   const g = c.getContext('2d')!;
   g.scale(S, S);
+  const D = SITES.dev;
 
   // white card with the dev site's grid
   g.fillStyle = '#fff';
@@ -89,7 +91,7 @@ function drawDev(mode: AvatarMode, img: HTMLImageElement | null) {
   for (let x = 12; x < PX; x += 12) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, PY); g.stroke(); }
   for (let y = 12; y < PY; y += 12) { g.beginPath(); g.moveTo(0, y); g.lineTo(PX, y); g.stroke(); }
 
-  // AIRU. wordmark + pixel squares
+  // AIRU. wordmark, card type, pixel squares
   g.textBaseline = 'alphabetic';
   g.font = `800 13px ${MONO}`;
   g.fillStyle = C.navy;
@@ -102,67 +104,73 @@ function drawDev(mode: AvatarMode, img: HTMLImageElement | null) {
     g.fillStyle = col as string;
     g.fillRect(dx + (ox as number), 13 + (oy as number), 6, 6);
   });
+  g.fillStyle = C.slate;
+  g.font = `500 6px ${MONO}`;
+  spaced(g, 'STAFF ID', dx - 6, 19, 0.6, 'right');
+  g.font = `400 6px ${JA_GOTHIC}`;
+  spaced(g, '社員証', dx - 6, 27, 0.8, 'right');
 
   // photo box: navy border + hard offset shadow, like the site's windows
-  const pw = 132, ph = 142, px = (PX - pw) / 2, py = 38;
+  const pw = 128, ph = 136, px = (PX - pw) / 2, py = 38;
   g.fillStyle = C.shadow;
   g.fillRect(px + 5, py + 5, pw, ph);
-  g.fillStyle = '#f1f5f9';
-  g.fillRect(px, py, pw, ph);
   g.save();
   g.beginPath();
   g.rect(px, py, pw, ph);
   g.clip();
-  if (mode === 'image' && img) drawCover(g, img, px, py, pw, ph);
-  else if (mode === 'mono') {
-    g.fillStyle = C.navy;
-    g.font = `800 46px ${MONO}`;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText('>_', px + pw / 2, py + ph / 2 + 2);
-  } else drawPixels(g, 'dev', px + (pw - 112) / 2, py + ph - 112, 112);
+  if (photo) drawPhoto(g, photo, px, py, pw, ph);
+  else drawSlot(g, px, py, pw, ph, true);
   g.restore();
   g.strokeStyle = C.navy;
   g.lineWidth = 2;
   g.strokeRect(px + 1, py + 1, pw - 2, ph - 2);
 
-  // > PLAYER: + name with cursor
-  g.textBaseline = 'alphabetic';
+  // > PLAYER: label, name in English and Japanese
+  const ny = py + ph + 20;
   g.fillStyle = C.slate;
-  g.font = `500 8px ${MONO}`;
-  spaced(g, '> PLAYER:', 12, py + ph + 22, 0.5);
+  g.font = `500 7.5px ${MONO}`;
+  const lw = spaced(g, '> PLAYER:', 12, ny, 0.5);
+  g.font = `400 7px ${JA_GOTHIC}`;
+  g.fillText('プレイヤー', 12 + lw + 6, ny);
+
   g.fillStyle = C.navy;
   g.font = `800 16px ${MONO}`;
-  const [first, ...rest] = SITES.dev.name.toUpperCase().split(' ');
+  const [first, ...rest] = D.name.toUpperCase().split(' ');
   const last = rest.join(' ');
-  spaced(g, first, 12, py + ph + 40, 0.6);
-  spaced(g, last, 12, py + ph + 58, 0.6);
-  const lw = [...last].reduce((w, ch) => w + g.measureText(ch).width + 0.6, 0);
+  spaced(g, first, 12, ny + 18, 0.6);
+  const lastW = spaced(g, last, 12, ny + 36, 0.6);
   g.fillStyle = C.amber;
-  g.fillRect(12 + lw + 2, py + ph + 46, 7, 14);
+  g.fillRect(12 + lastW + 3, ny + 24, 7, 14);
+  g.fillStyle = C.navy;
+  g.font = `500 9px ${JA_GOTHIC}`;
+  spaced(g, D.nameJa, 12, ny + 52, 0.6);
 
-  // amber band, like the ID band in the reference
-  const by = PY - 48;
+  // amber band with the role in both languages
+  const bh = 52;
+  const by = PY - bh;
   g.fillStyle = C.amber;
-  g.fillRect(0, by, PX, 48);
+  g.fillRect(0, by, PX, bh);
   g.fillStyle = C.navy;
   g.fillRect(0, by, PX, 2);
   g.font = `800 13px ${MONO}`;
-  spaced(g, SITES.dev.role.toUpperCase(), 12, by + 21, 0.5);
-  g.font = `500 9.5px ${MONO}`;
+  spaced(g, D.role.toUpperCase(), 12, by + 19, 0.5);
+  g.font = `600 8px ${JA_GOTHIC}`;
+  spaced(g, D.roleJa, 12, by + 31, 0.8);
+  g.font = `500 8.5px ${MONO}`;
   g.textAlign = 'left';
-  g.fillText(SITES.dev.host, 12, by + 37);
+  g.fillText(D.host, 12, by + 44);
   g.globalAlpha = 0.5;
   g.textAlign = 'right';
-  g.fillText('↻', PX - 12, by + 37);
+  g.fillText('↻', PX - 12, by + 44);
   g.globalAlpha = 1;
   return c;
 }
 
-function drawFrame(mode: AvatarMode, img: HTMLImageElement | null) {
+function drawFrame(photo: Photo) {
   const c = makeCanvas(TW, TH);
   const g = c.getContext('2d')!;
   g.scale(S, S);
+  const F = SITES.frame;
 
   g.fillStyle = C.paper;
   g.fillRect(0, 0, PX, PY);
@@ -172,7 +180,6 @@ function drawFrame(mode: AvatarMode, img: HTMLImageElement | null) {
   g.strokeStyle = C.ink;
   g.lineWidth = 1.2;
   g.beginPath();
-  // top-left, bottom-left, top-right, bottom-right corners
   g.moveTo(lx, ly + arm); g.lineTo(lx, ly); g.lineTo(lx + arm, ly);
   g.moveTo(lx, ly + lh - arm); g.lineTo(lx, ly + lh); g.lineTo(lx + arm, ly + lh);
   g.moveTo(lx + lw - arm, ly); g.lineTo(lx + lw, ly); g.lineTo(lx + lw, ly + arm);
@@ -188,39 +195,38 @@ function drawFrame(mode: AvatarMode, img: HTMLImageElement | null) {
   // tracked micro labels, top right
   g.fillStyle = C.stone;
   g.font = `400 6.5px ${SANS}`;
-  spaced(g, 'TOKYO', PX - 14, 22, 1.6, 'right');
-  spaced(g, 'FUJIFILM X-S20', PX - 14, 32, 1.6, 'right');
+  spaced(g, 'PRESS', PX - 14, 22, 1.6, 'right');
+  g.font = `400 6.5px ${JA_MINCHO}`;
+  spaced(g, '報道', PX - 14, 32, 1.6, 'right');
 
-  // big serif name, like "Gallery."
+  // big serif name, like "Gallery.", with the Japanese reading beside it
   g.fillStyle = C.ink;
   g.font = `400 48px ${SERIF}`;
   g.textAlign = 'left';
-  g.fillText(SITES.frame.name, 11, 98);
+  const nw = g.measureText(F.name).width;
+  g.fillText(F.name, 11, 96);
+  g.fillStyle = C.stone;
+  g.font = `400 10px ${JA_MINCHO}`;
+  spaced(g, F.nameJa, 11 + nw + 8, 95, 1.2);
+
+  // role in both languages
   g.fillStyle = C.stone;
   g.font = `500 7.5px ${SANS}`;
-  spaced(g, SITES.frame.role.toUpperCase(), 14, 116, 2.1);
+  const rw = spaced(g, F.role.toUpperCase(), 14, 116, 2.1);
+  g.font = `400 8px ${JA_MINCHO}`;
+  spaced(g, F.roleJa, 14 + rw + 8, 116, 1.6);
 
   // full-bleed photo, black and white
-  const py = 140, ph = PY - py;
-  const grad = g.createLinearGradient(0, py, PX * 0.3, PY);
-  grad.addColorStop(0, '#d6d3cc');
-  grad.addColorStop(1, '#8f8a82');
-  g.fillStyle = grad;
-  g.fillRect(0, py, PX, ph);
+  const py = 132, ph = PY - py;
   g.save();
   g.beginPath();
   g.rect(0, py, PX, ph);
   g.clip();
-  if (mode === 'image' && img) {
+  if (photo) {
     g.filter = 'grayscale(1) contrast(1.05)';
-    drawCover(g, img, 0, py, PX, ph);
+    drawPhoto(g, photo, 0, py, PX, ph);
     g.filter = 'none';
-  } else if (mode === 'mono') {
-    g.fillStyle = 'rgba(255,255,255,.9)';
-    g.font = `italic 400 130px ${SERIF}`;
-    g.textAlign = 'center';
-    g.fillText('A', PX / 2, PY - 18);
-  } else drawPixels(g, 'frame', (PX - 124) / 2, PY - 124, 124);
+  } else drawSlot(g, 0, py, PX, ph, false);
   g.restore();
 
   // viewfinder corners
@@ -234,13 +240,11 @@ function drawFrame(mode: AvatarMode, img: HTMLImageElement | null) {
   g.moveTo(x1 - a, y1); g.lineTo(x1, y1); g.lineTo(x1, y1 - a);
   g.stroke();
 
-  // host on the paper, right of the role line; turn mark in the frame corner
-  g.fillStyle = C.ink;
-  g.font = `500 7px ${SANS}`;
-  spaced(g, SITES.frame.host.toUpperCase(), PX - 14, 116, 1.3, 'right');
   g.fillStyle = '#fff';
-  g.shadowColor = 'rgba(0,0,0,.35)';
+  g.shadowColor = 'rgba(0,0,0,.4)';
   g.shadowBlur = 2;
+  g.font = `500 7px ${SANS}`;
+  spaced(g, F.host.toUpperCase(), 20, PY - 20, 1.3);
   g.font = `500 8px ${SANS}`;
   g.textAlign = 'right';
   g.fillText('↻', PX - 20, PY - 20);
@@ -253,14 +257,17 @@ function drawStrap(kind: 'dev' | 'frame') {
   const dev = kind === 'dev';
   const H = 64;
   const probe = makeCanvas(8, 8).getContext('2d')!;
-  const font = dev ? `800 26px ${MONO}` : `italic 400 36px ${SERIF}`;
+  const font = dev ? `800 24px ${MONO}` : `italic 400 34px ${SERIF}`;
   const label = dev ? 'AIRU. DEV  ·  ' : 'frame by airu  ·  ';
   probe.font = font;
   const unit = Math.ceil(probe.measureText(label).width);
-  const c = makeCanvas(unit * 2, H);
+  const c = makeCanvas(unit, H);
   const g = c.getContext('2d')!;
   g.fillStyle = dev ? C.amber : C.ink;
   g.fillRect(0, 0, c.width, H);
+  // woven texture: faint horizontal threads
+  g.fillStyle = dev ? 'rgba(15,23,42,.06)' : 'rgba(255,255,255,.05)';
+  for (let y = 9; y < H - 9; y += 3) g.fillRect(0, y, c.width, 1);
   g.fillStyle = dev ? C.navy : '#3a3a3a';
   g.fillRect(0, 0, c.width, dev ? 7 : 3);
   g.fillRect(0, H - (dev ? 7 : 3), c.width, dev ? 7 : 3);
@@ -269,8 +276,7 @@ function drawStrap(kind: 'dev' | 'frame') {
   g.textBaseline = 'middle';
   g.textAlign = 'left';
   g.fillText(label, 0, H / 2 + 1);
-  g.fillText(label, unit, H / 2 + 1);
-  return c;
+  return { canvas: c, aspect: unit / H };
 }
 
 function toTexture(c: HTMLCanvasElement, repeat = false) {
@@ -285,41 +291,36 @@ function toTexture(c: HTMLCanvasElement, repeat = false) {
   return t;
 }
 
-function loadImage(src: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
+function loadPhoto(p: (typeof PHOTOS)['dev']): Promise<Photo> {
+  return new Promise((resolve) => {
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
+    img.onload = () => resolve({ img, focus: p.focus, zoom: Math.max(1, p.zoom) });
+    img.onerror = () => resolve(null);
+    img.src = p.src;
   });
 }
 
+export type StrapTexture = { tex: THREE.Texture; aspect: number };
 export type CardTextures = {
   dev: THREE.Texture;
   frame: THREE.Texture;
-  strapDev: THREE.Texture;
-  strapFrame: THREE.Texture;
+  strapDev: StrapTexture;
+  strapFrame: StrapTexture;
 };
 
-export async function makeTextures(requested: AvatarMode): Promise<CardTextures> {
+export async function makeTextures(): Promise<CardTextures> {
   await Promise.all(
     [`800 16px ${MONO}`, `500 16px ${MONO}`, `400 48px ${SERIF}`, `italic 400 16px ${SERIF}`, `400 8px ${SANS}`, `500 8px ${SANS}`].map((f) =>
       document.fonts.load(f).catch(() => undefined),
     ),
   );
-  let mode = requested;
-  let imgs: [HTMLImageElement, HTMLImageElement] | null = null;
-  if (mode === 'image') {
-    try {
-      imgs = await Promise.all([loadImage(AVATAR.images.dev), loadImage(AVATAR.images.frame)]);
-    } catch {
-      mode = 'pixel';
-    }
-  }
+  const [pd, pf] = await Promise.all([loadPhoto(PHOTOS.dev), loadPhoto(PHOTOS.frame)]);
+  const sd = drawStrap('dev');
+  const sf = drawStrap('frame');
   return {
-    dev: toTexture(drawDev(mode, imgs?.[0] ?? null)),
-    frame: toTexture(drawFrame(mode, imgs?.[1] ?? null)),
-    strapDev: toTexture(drawStrap('dev'), true),
-    strapFrame: toTexture(drawStrap('frame'), true),
+    dev: toTexture(drawDev(pd)),
+    frame: toTexture(drawFrame(pf)),
+    strapDev: { tex: toTexture(sd.canvas, true), aspect: sd.aspect },
+    strapFrame: { tex: toTexture(sf.canvas, true), aspect: sf.aspect },
   };
 }

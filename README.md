@@ -21,12 +21,12 @@ npm run build    # static output in dist/
 
 Everything you will usually change is in `src/config.ts`:
 
-- names, roles and URLs of both sides
-- avatar mode: `pixel`, `mono` or `image`
+- names, roles and URLs of both sides, in English and Japanese
+- the two card photos and how they are cropped
 
-Preview any avatar mode without editing via the URL: `?avatar=pixel`, `?avatar=mono`, `?avatar=image`.
+Photos: add `public/avatar/dev.jpg` (shown in colour, near-square slot) and `public/avatar/frame.jpg` (shown in black and white, wide slot). Until a file exists the card shows an empty photo slot. Use `focus` and `zoom` in the config to frame your face.
 
-For `image`, add `public/avatar/dev.jpg` (colour, portrait crop) and `public/avatar/frame.jpg` (shown in black and white, wider crop). If either is missing, the card falls back to pixel art.
+The feel of the lanyard (gravity, damping, strap length) is set by the constants at the top of `src/components/Lanyard.tsx`.
 
 The card faces are drawn on a canvas in `src/lib/faces.ts` (one function per side), so layout changes happen there.
 
