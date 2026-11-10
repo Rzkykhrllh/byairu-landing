@@ -1,8 +1,10 @@
 ---
 import '@fontsource/jetbrains-mono/500.css';
+import '@fontsource/jetbrains-mono/600.css';
 import '@fontsource/jetbrains-mono/800.css';
 import '@fontsource/cormorant-garamond/400.css';
 import '@fontsource/cormorant-garamond/400-italic.css';
+import '@fontsource/cormorant-garamond/600-italic.css';
 import '@fontsource/inter-tight/400.css';
 import '@fontsource/inter-tight/500.css';
 import Lanyard from '../components/Lanyard';
@@ -77,10 +79,10 @@ const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street an
       .fb-dev .n { padding: 0 12px; margin-top: auto; font-weight: 800; font-size: 16px; line-height: 1.2; }
       .fb-dev .b { margin-top: 14px; background: #e9aa18; border-top: 2px solid #0f172a; padding: 9px 12px 10px; font-size: 13px; font-weight: 800; }
       .fb-dev .b span { display: block; font-size: 10px; font-weight: 500; }
-      .fb-frame { background: #f7f7f5; color: #171717; }
-      .fb-frame .n { padding: 26px 12px 0; font-family: var(--serif); font-size: 48px; line-height: .9; }
-      .fb-frame .r { padding: 8px 14px 0; font-family: var(--sans); font-size: 8px; letter-spacing: .26em; color: #737373; }
-      .fb-frame .p { margin-top: auto; height: 150px; background: linear-gradient(170deg, #d6d3cc, #8f8a82); color: #fff; font-family: var(--sans); font-size: 8px; letter-spacing: .16em; display: flex; align-items: flex-end; padding: 14px; }
+      .fb-frame { background: #0b0b0b; color: #f5f5f4; }
+      .fb-frame .p { order: -1; height: 208px; background: #cfccc6 url(/avatar/frame.jpg) center / cover; }
+      .fb-frame .n { padding: 6px 10px 0; font-family: var(--serif); font-size: 44px; line-height: 1; }
+      .fb-frame .r { padding: 2px 13px 0; font-family: var(--sans); font-size: 7px; letter-spacing: .3em; color: #a3a3a3; }
     </style>
   </head>
   <body>
@@ -97,7 +99,7 @@ const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street an
           <a class="fb fb-frame" href={SITES.frame.url}>
             <span class="n">Airu.</span>
             <span class="r">PHOTOGRAPHER</span>
-            <span class="p">{SITES.frame.host.toUpperCase()}</span>
+            <span class="p" aria-hidden="true"></span>
           </a>
         </div>
       </div>
