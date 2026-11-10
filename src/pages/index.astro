@@ -1,0 +1,123 @@
+---
+import '@fontsource/jetbrains-mono/500.css';
+import '@fontsource/jetbrains-mono/800.css';
+import '@fontsource/cormorant-garamond/400.css';
+import '@fontsource/cormorant-garamond/400-italic.css';
+import '@fontsource/inter-tight/400.css';
+import '@fontsource/inter-tight/500.css';
+import Lanyard from '../components/Lanyard';
+import { SITES } from '../config';
+
+const title = 'Airu — Software Engineer & Photographer';
+const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street and travel photographer in Tokyo. Two passes, one person.';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href="https://byairu.com/" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://byairu.com/" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta name="twitter:card" content="summary" />
+    <meta name="theme-color" content="#f4f3f0" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141518" media="(prefers-color-scheme: dark)" />
+    <script is:inline>
+      // Decide early whether the 3D card will run, so the static fallback never flashes.
+      (function () {
+        try {
+          var c = document.createElement('canvas');
+          var gl = c.getContext('webgl2') || c.getContext('webgl');
+          var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          if (gl && !reduce) document.documentElement.classList.add('will-3d');
+        } catch (e) {}
+      })();
+    </script>
+    <style is:global>
+      :root {
+        --bg: #f4f3f0;
+        --fg: #1d1e22;
+        --muted: #8a8c92;
+        --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+        --serif: 'Cormorant Garamond', Georgia, serif;
+        --sans: 'Inter Tight', 'Helvetica Neue', Arial, sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #141518; --fg: #ececea; --muted: #7d8087; color-scheme: dark; }
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body { background: var(--bg); color: var(--fg); font-family: var(--mono); overflow: hidden; }
+      .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+      main { position: relative; height: 100dvh; }
+      .scene { position: absolute; inset: 0; }
+
+      .links {
+        position: absolute; left: 0; right: 0; bottom: max(24px, env(safe-area-inset-bottom));
+        display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 22px;
+        padding-inline: 16px; font-size: 12px; z-index: 2;
+      }
+      .links a { color: var(--muted); text-decoration: none; padding-bottom: 3px; border-bottom: 1px solid transparent; transition: color .35s, border-color .35s; }
+      .links a.on, .links a:hover { color: var(--fg); border-color: var(--fg); }
+      a:focus-visible { outline: 2px solid var(--fg); outline-offset: 4px; }
+
+      /* static fallback (no WebGL or reduced motion): both cards side by side */
+      .fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 20px; padding: 24px 16px 80px; flex-wrap: wrap; overflow-y: auto; }
+      html.will-3d .fallback { display: none; }
+      .fb { width: 212px; height: 316px; border-radius: 8px; overflow: hidden; text-decoration: none; display: flex; flex-direction: column; box-shadow: 0 0 0 10px #16171b, 0 20px 36px rgba(0,0,0,.25); }
+      .fb-dev { background: #fff linear-gradient(#e2e8f0 1px, transparent 1px) 0 0 / 12px 12px; color: #0f172a; font-family: var(--mono); }
+      .fb-dev .t { padding: 14px 12px 0; font-weight: 800; }
+      .fb-dev .t i { font-style: normal; color: #e9aa18; }
+      .fb-dev .n { padding: 0 12px; margin-top: auto; font-weight: 800; font-size: 16px; line-height: 1.2; }
+      .fb-dev .b { margin-top: 14px; background: #e9aa18; border-top: 2px solid #0f172a; padding: 9px 12px 10px; font-size: 13px; font-weight: 800; }
+      .fb-dev .b span { display: block; font-size: 10px; font-weight: 500; }
+      .fb-frame { background: #f7f7f5; color: #171717; }
+      .fb-frame .n { padding: 26px 12px 0; font-family: var(--serif); font-size: 48px; line-height: .9; }
+      .fb-frame .r { padding: 8px 14px 0; font-family: var(--sans); font-size: 8px; letter-spacing: .26em; color: #737373; }
+      .fb-frame .p { margin-top: auto; height: 150px; background: linear-gradient(170deg, #d6d3cc, #8f8a82); color: #fff; font-family: var(--sans); font-size: 8px; letter-spacing: .16em; display: flex; align-items: flex-end; padding: 14px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 class="sr-only">Rizky "Airu" Khairullah — software engineer and photographer</h1>
+      <div class="scene">
+        <Lanyard client:only="react" />
+        <div class="fallback">
+          <a class="fb fb-dev" href={SITES.dev.url}>
+            <span class="t">AIRU<i>.</i></span>
+            <span class="n">RIZKY<br />KHAIRULLAH</span>
+            <span class="b">SOFTWARE ENGINEER<span>{SITES.dev.host}</span></span>
+          </a>
+          <a class="fb fb-frame" href={SITES.frame.url}>
+            <span class="n">Airu.</span>
+            <span class="r">PHOTOGRAPHER</span>
+            <span class="p">{SITES.frame.host.toUpperCase()}</span>
+          </a>
+        </div>
+      </div>
+      <nav class="links" aria-label="Portfolios">
+        <a id="l-dev" class="on" href={SITES.dev.url}>{SITES.dev.host} ↗</a>
+        <a id="l-frame" href={SITES.frame.url}>{SITES.frame.host} ↗</a>
+      </nav>
+    </main>
+
+    <script>
+      const links = { dev: document.getElementById('l-dev')!, frame: document.getElementById('l-frame')! };
+      window.addEventListener('lanyard:side', (e) => {
+        const side = (e as CustomEvent<'dev' | 'frame'>).detail;
+        links.dev.classList.toggle('on', side === 'dev');
+        links.frame.classList.toggle('on', side === 'frame');
+      });
+      // hovering a link turns the card to that side
+      (['dev', 'frame'] as const).forEach((s) =>
+        links[s].addEventListener('pointerenter', () => window.dispatchEvent(new CustomEvent('lanyard:set', { detail: s }))),
+      );
+    </script>
+  </body>
+</html>
