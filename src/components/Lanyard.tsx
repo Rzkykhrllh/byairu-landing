@@ -501,6 +501,7 @@ function Badge({ tex }: { tex: CardTextures }) {
     curve.points[1].copy(curve.points[0]).addScaledVector(tmp.up, 0.3);
     for (let i = 0; i < ROPE_POINTS - 1; i++) curve.points[2 + i].copy(smooth(rope[ROPE_POINTS - 2 - i], delta));
     curve.points[ROPE_POINTS + 1].copy(top.current.translation() as THREE.Vector3);
+    curve.updateArcLengths(); // three caches arc lengths; stale ones skew the strap texture and twist
     ribbon.update(curve, yawU.current, tmp.q);
   });
 
