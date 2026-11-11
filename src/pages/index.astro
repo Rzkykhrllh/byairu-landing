@@ -59,6 +59,9 @@ const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street an
       .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
       main { position: relative; height: 100dvh; }
       .scene { position: absolute; inset: 0; }
+      /* a quick fade as the first frame lands; the card itself drops in from above */
+      .scene canvas { opacity: 0; transition: opacity .35s ease; }
+      html.has-3d .scene canvas { opacity: 1; }
 
       .links {
         position: absolute; left: 0; right: 0; bottom: max(24px, env(safe-area-inset-bottom));

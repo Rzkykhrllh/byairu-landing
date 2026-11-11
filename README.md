@@ -5,15 +5,15 @@ Landing page for **byairu.com**: a 3D lanyard ID card with two sides.
 - Front: Rizky Khairullah, Software Engineer, styled like **dev.byairu.com**
 - Back: Airu., Photographer, styled like **frame.byairu.com**
 
-Drag the card to swing it, tap it to turn it over. The links under the card follow the side that faces you.
+Drag the card to swing it, throw it, tap it to turn it over. The strap twists as the card turns. The links under the card follow the side that faces you.
 
-Stack: Astro, React island, three.js via @react-three/fiber, Rapier physics, meshline for the strap.
+Stack: Astro, React island, three.js via @react-three/fiber, Rapier physics. The strap is a ribbon mesh rebuilt each frame from the rope bodies.
 
 ## Develop
 
 ```bash
 npm install
-npm run dev      # http://localhost:4321
+npm run dev      # http://localhost:4321 (or the next free port)
 npm run build    # static output in dist/
 ```
 
@@ -24,9 +24,17 @@ Everything you will usually change is in `src/config.ts`:
 - names, roles and URLs of both sides, in English and Japanese
 - the two card photos and how they are cropped
 
-Photos: add `public/avatar/dev.jpg` (shown in colour, near-square slot) and `public/avatar/frame.jpg` (shown in black and white, wide slot). Until a file exists the card shows an empty photo slot. Use `focus` and `zoom` in the config to frame your face.
+Photos: the engineer side shows the pixel character in `public/avatar/player.png` (or `public/avatar/dev.jpg` if it exists). The photographer side shows `public/avatar/frame.jpg`; until it exists the card shows an empty slot. Use `focus` and `zoom` in the config to frame your face. `CARD_FINISH` sets the card surface (matte, glossy, holo).
 
-The feel of the lanyard (gravity, damping, strap length) is set by the constants at the top of `src/components/Lanyard.tsx`.
+## How the lanyard moves
+
+All of it lives in `src/components/Lanyard.tsx`, with the knobs at the top of the file.
+
+- **Bodies.** A fixed point above the screen, four rope points, and the card, joined by rope joints (a maximum length, so the strap can go slack) and a ball joint at the clamp.
+- **Forces.** Gravity swings the card. The only extra force is a torsion spring that turns the card to the chosen side, like the strap's twist (`TURN_STIFF`, `TURN_DAMP`). It runs once per physics step (fixed 1/60s), so the feel is the same on 60Hz and 120Hz screens.
+- **Drag and throw.** While held, the card follows the pointer. Past the strap's length it is held back by a rubber band that gives at most `STRAP_STRETCH`. On release it keeps the speed of the last ~90ms of the drag (capped by `THROW_MAX`). A press that barely moves is a tap and turns the card over.
+- **Rest.** Once the card settles, the physics bodies fall asleep and nothing is rendered until something moves again (on-demand rendering), so an idle page costs no battery.
+- **Fit.** The camera moves back just enough for the hanging card to clear the links under it and keep side margins, for any window shape.
 
 The card faces are drawn on a canvas in `src/lib/faces.ts` (one function per side), so layout changes happen there.
 
