@@ -30,7 +30,7 @@ const SANS = '"Inter Tight", "Helvetica Neue", Arial, sans-serif';
 const JA_GOTHIC = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif';
 const JA_MINCHO = '"Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif';
 
-type Photo = { img: HTMLImageElement; focus: [number, number]; zoom: number; mono: boolean } | null;
+type Photo = { img: HTMLImageElement; focus: [number, number]; zoom: number; mono: boolean; cutout: boolean } | null;
 
 function makeCanvas(w: number, h: number) {
   const c = document.createElement('canvas');
@@ -83,24 +83,59 @@ function px(g: CanvasRenderingContext2D, x: number, y: number, size: number, col
   g.fillRect(x, y, size, size);
 }
 
-/** Segmented retro bar: a navy outline, filled cells up to `v` (0..1). */
-function bar(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, v: number, col: string) {
-  g.fillStyle = '#fff';
-  g.fillRect(x, y, w, h);
-  const cell = 5;
-  const cells = Math.floor((w - 2) / cell);
-  for (let i = 0; i < Math.round(cells * v); i++) {
-    g.fillStyle = col;
-    g.fillRect(x + 1.5 + i * cell, y + 1.5, cell - 1, h - 3);
+/** The pixel character in a little game room: warm wall, pixel window, checker floor. */
+function portrait(g: CanvasRenderingContext2D, photo: Photo, sprite: HTMLImageElement | null, x: number, y: number, w: number, h: number, k: number) {
+  g.fillStyle = 'rgba(15,23,42,.25)';
+  g.fillRect(x + 3, y + 3, w, h); // hard offset shadow
+  g.save();
+  g.beginPath();
+  g.rect(x, y, w, h);
+  g.clip();
+  if (photo) drawPhoto(g, photo, x, y, w, h);
+  else {
+    g.fillStyle = '#fdf3d6';
+    g.fillRect(x, y, w, h);
+    const floor = y + h - Math.max(14, h * 0.2);
+    for (let fx = x; fx < x + w; fx += 8) {
+      for (let fy = floor; fy < y + h; fy += 8) {
+        g.fillStyle = ((fx - x) / 8 + (fy - floor) / 8) % 2 ? '#e2e8f0' : '#f1f5f9';
+        g.fillRect(fx, fy, 8, 8);
+      }
+    }
+    g.fillStyle = C.navy;
+    g.fillRect(x, floor - 1, w, 1.2);
+    g.fillStyle = '#bfdbfe';
+    g.fillRect(x + 8, y + 10, 16, 12);
+    g.strokeStyle = C.navy;
+    g.lineWidth = 1;
+    g.strokeRect(x + 8.5, y + 10.5, 15, 11);
+    g.beginPath(); g.moveTo(x + 16, y + 10.5); g.lineTo(x + 16, y + 21.5); g.stroke();
+    if (sprite) {
+      // `k` = the character's height as a share of the window
+      const sh = h * k, sw = (sprite.width / sprite.height) * sh;
+      const cx = x + w / 2, feet = floor + (y + h - floor) * 0.55;
+      g.fillStyle = 'rgba(15,23,42,.18)';
+      g.beginPath();
+      g.ellipse(cx, feet - sh * 0.01, sw * 0.4, sh * 0.035, 0, 0, Math.PI * 2);
+      g.fill();
+      // a small pixel sprite is blown up crisp; a large one is scaled down smoothly
+      const upscale = sprite.height < sh * S;
+      g.imageSmoothingEnabled = !upscale;
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(sprite, cx - sw / 2, feet - sh, sw, sh);
+      g.imageSmoothingEnabled = true;
+    }
   }
+  g.restore();
   g.strokeStyle = C.navy;
-  g.lineWidth = 1;
-  g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  g.lineWidth = 2;
+  g.strokeRect(x + 1, y + 1, w - 2, h - 2);
 }
 
 /**
- * Engineer side, styled after dev.byairu.com: a retro game window (PORTFOLIO.EXE), grid paper,
- * a player portrait with character stats, and the amber role band.
+ * Engineer side, after dev.byairu.com but quiet: faint grid paper, a slim title bar, the portrait
+ * beside the name, then only the essentials (experience, base, stack), the amber role band and
+ * a navy strip with the link.
  */
 function drawDev(photo: Photo, sprite: HTMLImageElement | null) {
   const c = makeCanvas(TW, TH);
@@ -108,150 +143,92 @@ function drawDev(photo: Photo, sprite: HTMLImageElement | null) {
   g.scale(S, S);
   const D = SITES.dev;
   g.textBaseline = 'alphabetic';
+  const M = 16, R = PX - M;
+  const [FIRST, ...REST] = D.name.toUpperCase().split(' ');
+  const LAST = REST.join(' ');
 
-  // grid paper
+  // faint grid paper
   g.fillStyle = '#fff';
   g.fillRect(0, 0, PX, PY);
-  g.strokeStyle = C.grid;
+  g.strokeStyle = '#f1f5f9';
   g.lineWidth = 0.5;
   for (let x = 12; x < PX; x += 12) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, PY); g.stroke(); }
   for (let y = 12; y < PY; y += 12) { g.beginPath(); g.moveTo(0, y); g.lineTo(PX, y); g.stroke(); }
 
-  // window title bar (the strap slot is punched through its top edge)
-  const tb = 32;
+  // slim title bar (the strap slot is punched through its top edge)
   g.fillStyle = C.navy;
-  g.fillRect(0, 0, PX, tb);
-  px(g, 12, 18, 6, C.amber);
-  px(g, 21, 18, 6, C.purple);
-  px(g, 30, 18, 6, '#fff');
-  g.strokeStyle = '#fff';
-  g.lineWidth = 1.2;
-  g.strokeRect(PX - 18.4, 18.6, 5.8, 5.8);
-  g.fillStyle = '#fff';
-  g.font = `600 6.5px ${MONO}`;
-  spaced(g, 'PLAYER_1.EXE', PX - 26, 24, 1, 'right');
-
-  // > PLAYER 1
-  g.fillStyle = C.slate;
-  g.font = `500 7px ${MONO}`;
-  const lw = spaced(g, '> PLAYER 1', 12, 49, 0.5);
-  g.font = `400 6.5px ${JA_GOTHIC}`;
-  g.fillText('プレイヤー', 12 + lw + 6, 49);
-
-  // portrait window: navy border + hard offset shadow
-  const bx = 12, by = 56, bw = 84, bh = 112;
-  g.fillStyle = 'rgba(15,23,42,.3)';
-  g.fillRect(bx + 4, by + 4, bw, bh);
-  g.save();
-  g.beginPath();
-  g.rect(bx, by, bw, bh);
-  g.clip();
-  if (photo) {
-    drawPhoto(g, photo, bx, by, bw, bh);
-  } else {
-    // little game room: warm wall, checker floor, the character standing on it
-    g.fillStyle = '#fdf3d6';
-    g.fillRect(bx, by, bw, bh);
-    const floor = by + bh - 24;
-    for (let x = bx; x < bx + bw; x += 8) {
-      for (let y = floor; y < by + bh; y += 8) {
-        g.fillStyle = ((x - bx) / 8 + (y - floor) / 8) % 2 ? '#e2e8f0' : '#f1f5f9';
-        g.fillRect(x, y, 8, 8);
-      }
-    }
-    g.fillStyle = C.navy;
-    g.fillRect(bx, floor - 1, bw, 1.5);
-    // a pixel window on the wall
-    g.fillStyle = '#bfdbfe';
-    g.fillRect(bx + 10, by + 12, 18, 14);
-    g.strokeStyle = C.navy;
-    g.lineWidth = 1;
-    g.strokeRect(bx + 10.5, by + 12.5, 17, 13);
-    g.beginPath(); g.moveTo(bx + 19, by + 12.5); g.lineTo(bx + 19, by + 25.5); g.stroke();
-    if (sprite) {
-      const k = 2.75;
-      const sw = sprite.width * k, sh = sprite.height * k;
-      g.imageSmoothingEnabled = false;
-      // soft shadow under the feet
-      g.fillStyle = 'rgba(15,23,42,.18)';
-      g.beginPath();
-      g.ellipse(bx + bw / 2, floor + 9, 15, 3.5, 0, 0, Math.PI * 2);
-      g.fill();
-      g.drawImage(sprite, bx + (bw - sw) / 2, floor + 10 - sh, sw, sh);
-      g.imageSmoothingEnabled = true;
-    }
-  }
-  g.restore();
-  g.strokeStyle = C.navy;
-  g.lineWidth = 2;
-  g.strokeRect(bx + 1, by + 1, bw - 2, bh - 2);
-
-  // character stats, right column
-  const sx = 106, sr = PX - 12;
-  g.fillStyle = C.slate;
-  g.font = `600 5.5px ${MONO}`;
-  spaced(g, 'CHARACTER STATS', sx, 62, 0.6);
-  const valCol = [C.navy, C.purple, '#b7810c'];
-  D.stats.forEach(([k, v], i) => {
-    const y = 78 + i * 14;
-    g.fillStyle = C.slate;
-    g.font = `500 6px ${MONO}`;
-    spaced(g, k, sx, y, 0.4);
-    g.fillStyle = valCol[i] ?? C.navy;
-    g.font = `800 6.5px ${MONO}`;
-    spaced(g, v, sr, y, 0.3, 'right');
-    g.fillStyle = C.grid;
-    g.fillRect(sx, y + 4, sr - sx, 0.75);
-  });
-
-  // HP / MP
-  g.fillStyle = C.navy;
-  g.font = `800 6px ${MONO}`;
-  g.fillText('HP', sx, 134);
-  bar(g, sx + 14, 128, sr - sx - 14, 7, 0.86, C.amber);
-  g.fillStyle = C.navy;
-  g.fillText('MP', sx, 148);
-  bar(g, sx + 14, 142, sr - sx - 14, 7, 0.64, C.purple);
+  g.fillRect(0, 0, PX, 26);
+  [C.amber, C.purple, '#fff'].forEach((col, i) => px(g, M + i * 8, 15, 5, col));
   g.fillStyle = C.slate;
   g.font = `500 5.5px ${MONO}`;
-  spaced(g, 'STATUS  ·  ONLINE', sx, 165, 0.4);
-  px(g, sr - 4, 160, 4, '#10b981');
+  spaced(g, 'PLAYER_1.EXE', R, 20, 1.2, 'right');
 
-  // name in English and Japanese, with the blinking-cursor block
-  const ny = 194;
+  // portrait and name, centred on each other
+  portrait(g, photo, sprite, M, 44, 72, 92, 0.8);
+  const nx = M + 72 + 14;
   g.fillStyle = C.navy;
-  g.font = `800 18px ${MONO}`;
-  const [first, ...rest] = D.name.toUpperCase().split(' ');
-  spaced(g, first, 12, ny, 0.8);
-  const lastW = spaced(g, rest.join(' '), 12, ny + 20, 0.8);
+  g.font = `800 14px ${MONO}`;
+  spaced(g, FIRST, nx, 80, 0.4);
+  const lw = spaced(g, LAST, nx, 97, 0.4);
   g.fillStyle = C.amber;
-  g.fillRect(12 + lastW + 3, ny + 6, 7, 15);
+  g.fillRect(nx + lw + 2.5, 86, 5, 11.5);
   g.fillStyle = C.slate;
-  g.font = `500 8.5px ${JA_GOTHIC}`;
-  spaced(g, D.nameJa, 12, ny + 35, 0.8);
+  g.font = `500 7px ${JA_GOTHIC}`;
+  spaced(g, D.nameJa, nx, 112, 0.8);
 
-  // pixel corner, like the site's hero
-  px(g, PX - 22, ny - 10, 4, C.purple);
-  px(g, PX - 17, ny - 10, 4, C.purple);
-  px(g, PX - 17, ny - 5, 4, C.purple);
+  // hairline
+  g.fillStyle = C.grid;
+  g.fillRect(M, 156, R - M, 0.8);
 
-  // amber band with the role in both languages
-  const bh2 = 58;
-  const b = PY - bh2;
-  g.fillStyle = C.amber;
-  g.fillRect(0, b, PX, bh2);
-  g.fillStyle = C.navy;
-  g.fillRect(0, b, PX, 2.5);
-  g.font = `800 13.5px ${MONO}`;
-  spaced(g, D.role.toUpperCase(), 12, b + 21, 0.5);
-  g.font = `600 8px ${JA_GOTHIC}`;
-  spaced(g, D.roleJa, 12, b + 33, 0.8);
+  // two quiet columns
+  const fact = (label: string, value: string, x: number) => {
+    g.fillStyle = C.shadow;
+    g.font = `600 5.5px ${MONO}`;
+    spaced(g, label, x, 174, 1.4);
+    g.fillStyle = C.navy;
+    g.font = `700 8px ${MONO}`;
+    spaced(g, value, x, 188, 0.2);
+  };
+  fact('EXPERIENCE', D.experience, M);
+  fact('BASED IN', D.location, 112);
+
+  // stack as plain text, two lines
+  g.fillStyle = C.shadow;
+  g.font = `600 5.5px ${MONO}`;
+  spaced(g, 'STACK', M, 212, 1.4);
+  const half = Math.ceil(D.stack.length / 2);
   g.font = `600 7.5px ${MONO}`;
-  g.textAlign = 'left';
-  g.fillText(D.host, 12, b + 48);
-  g.textAlign = 'right';
-  g.fillText('▶ PRESS START', PX - 12, b + 48);
-  g.textAlign = 'left';
+  [D.stack.slice(0, half), D.stack.slice(half)].forEach((line, i) => {
+    let x = M;
+    line.forEach((t, j) => {
+      g.fillStyle = C.navy;
+      g.fillText(t, x, 226 + i * 12);
+      x += g.measureText(t).width;
+      if (j < line.length - 1) {
+        g.fillStyle = '#cbd5e1';
+        g.fillText('  /  ', x, 226 + i * 12);
+        x += g.measureText('  /  ').width;
+      }
+    });
+  });
+
+  // bottom: the amber role band, then the navy link strip
+  const LINK_H = 22, BAND_H = 38;
+  const y = PY - LINK_H - BAND_H;
+  g.fillStyle = C.amber;
+  g.fillRect(0, y, PX, BAND_H);
+  g.fillStyle = C.navy;
+  g.font = `800 13px ${MONO}`;
+  spaced(g, D.role.toUpperCase(), M, y + 20, 0.6);
+  g.font = `600 7px ${JA_GOTHIC}`;
+  spaced(g, D.roleJa, M, y + 31, 0.9);
+  g.fillStyle = C.navy;
+  g.fillRect(0, PY - LINK_H, PX, LINK_H);
+  g.fillStyle = '#fff';
+  g.font = `500 6.5px ${MONO}`;
+  spaced(g, D.host, M, PY - 8.5, 0.4);
+  g.fillStyle = C.slate;
+  spaced(g, '↻', R, PY - 8.5, 0, 'right');
   return c;
 }
 
@@ -264,6 +241,24 @@ function bracket(g: CanvasRenderingContext2D, x: number, y: number, w: number, h
   g.moveTo(x, y + h - arm); g.lineTo(x, y + h); g.lineTo(x + arm, y + h);
   g.moveTo(x + w - arm, y + h); g.lineTo(x + w, y + h); g.lineTo(x + w, y + h - arm);
   g.stroke();
+}
+
+/** A copy of the image whose left and/or right edge fades to transparent. */
+function fadeSides(img: HTMLImageElement, left: boolean, right: boolean) {
+  if (!left && !right) return img;
+  const c = makeCanvas(img.width, img.height);
+  const g = c.getContext('2d')!;
+  g.drawImage(img, 0, 0);
+  const f = img.width * 0.12;
+  const grad = g.createLinearGradient(0, 0, img.width, 0);
+  grad.addColorStop(0, left ? 'rgba(0,0,0,0)' : '#000');
+  grad.addColorStop(f / img.width, '#000');
+  grad.addColorStop(1 - f / img.width, '#000');
+  grad.addColorStop(1, right ? 'rgba(0,0,0,0)' : '#000');
+  g.globalCompositeOperation = 'destination-in';
+  g.fillStyle = grad;
+  g.fillRect(0, 0, img.width, img.height);
+  return c;
 }
 
 /**
@@ -287,8 +282,28 @@ function drawFrame(photo: Photo) {
   g.rect(0, 0, PX, ph);
   g.clip();
   if (photo) {
-    if (photo.mono) g.filter = 'grayscale(1) contrast(1.05)';
-    drawPhoto(g, photo, 0, 0, PX, ph);
+    if (photo.cutout) {
+      // soft studio backdrop: warm paper, lighter behind the head, falling off to the edges
+      g.fillStyle = '#d6d1c9';
+      g.fillRect(0, 0, PX, ph);
+      const lift = g.createRadialGradient(PX * 0.5, ph * 0.32, 8, PX * 0.5, ph * 0.4, PX * 0.8);
+      lift.addColorStop(0, 'rgba(255,253,248,.85)');
+      lift.addColorStop(1, 'rgba(255,253,248,0)');
+      g.fillStyle = lift;
+      g.fillRect(0, 0, PX, ph);
+    }
+    // soft monochrome: a hint of warmth and gentle contrast, like a print rather than a hard B&W
+    if (photo.mono) g.filter = 'grayscale(1) sepia(.14) contrast(.97) brightness(1.03)';
+    if (photo.cutout) {
+      // The figure keeps its size and slides sideways so the head (focus x) sits on the card's
+      // centre line, under the strap. Where the source photo's own edge (a cut-off arm) lands inside
+      // the card, it fades into the backdrop instead of ending in a hard line.
+      const fx = photo.focus[0];
+      const fw = PX * 1.02 * photo.zoom;
+      const fh = (photo.img.height / photo.img.width) * fw;
+      const x = PX / 2 - fx * fw;
+      g.drawImage(fadeSides(photo.img, x > 0, x + fw < PX), x, 30 - fh * photo.focus[1] * 0.2, fw, fh);
+    } else drawPhoto(g, photo, 0, 0, PX, ph);
     g.filter = 'none';
     // a little shade at the bottom so the caption reads on any photo
     const grad = g.createLinearGradient(0, ph - 40, 0, ph);
@@ -393,10 +408,10 @@ function loadImage(src: string): Promise<HTMLImageElement | null> {
   });
 }
 
-function loadPhoto(p: (typeof PHOTOS)['dev']): Promise<Photo> {
+function loadPhoto(p: (typeof PHOTOS)[keyof typeof PHOTOS]): Promise<Photo> {
   return new Promise((resolve) => {
     const img = new Image();
-    img.onload = () => resolve({ img, focus: p.focus, zoom: Math.max(1, p.zoom), mono: p.mono });
+    img.onload = () => resolve({ img, focus: p.focus, zoom: Math.max(1, p.zoom), mono: p.mono, cutout: p.cutout });
     img.onerror = () => resolve(null);
     img.src = p.src;
   });
@@ -411,7 +426,7 @@ export type CardTextures = {
 
 export async function makeTextures(): Promise<CardTextures> {
   await Promise.all(
-    [`800 16px ${MONO}`, `500 16px ${MONO}`, `400 48px ${SERIF}`, `italic 400 16px ${SERIF}`, `italic 600 16px ${SERIF}`, `600 16px ${MONO}`, `400 8px ${SANS}`, `500 8px ${SANS}`].map((f) =>
+    [`800 16px ${MONO}`, `500 16px ${MONO}`, `400 48px ${SERIF}`, `italic 400 16px ${SERIF}`, `italic 600 16px ${SERIF}`, `600 16px ${MONO}`, `700 16px ${MONO}`, `400 8px ${SANS}`, `500 8px ${SANS}`].map((f) =>
       document.fonts.load(f).catch(() => undefined),
     ),
   );

@@ -8,12 +8,10 @@ export const SITES = {
     roleJa: 'ソフトウェアエンジニア',
     url: 'https://dev.byairu.com',
     host: 'dev.byairu.com',
-    // character stats, as on dev.byairu.com
-    stats: [
-      ['CLASS', 'ENGINEER'],
-      ['EXP', '3+ YRS'],
-      ['FUEL', '1000+ COFFEE'],
-    ] as const,
+    // the essentials, from dev.byairu.com
+    experience: '3+ years',
+    location: 'Yokohama, Japan',
+    stack: ['Python', 'Django', 'FastAPI', 'TypeScript', 'Vue', 'Docker'],
   },
   frame: {
     name: 'Airu.',
@@ -32,19 +30,22 @@ export type Side = keyof typeof SITES;
 /**
  * Card pictures. Files live in /public/avatar.
  *
- * player: the pixel character on the engineer side (drawn crisp, no smoothing).
+ * player: the pixel character on the engineer side (Airu, from the anniversary book sprites).
  *         If /avatar/dev.jpg exists it is used instead, as a regular photo.
  * frame:  the full-bleed photo on the photographer side. Until the file exists the card shows an empty slot.
  *
  * focus: which point of the photo stays in frame, 0..1 from the left / top (0.5, 0.5 = center).
  * zoom:  1 = fill the slot, 1.5 = crop in 50% tighter.
  * mono:  true = show the photo in black and white.
+ * cutout: true = the photo has no background (PNG/WebP with transparency); a backdrop is drawn behind it.
  */
-export const PLAYER_SPRITE = '/avatar/player.png';
+export const PLAYER_SPRITE = '/avatar/airu-idle.webp';
 
 export const PHOTOS = {
-  dev: { src: '/avatar/dev.jpg', focus: [0.5, 0.35] as [number, number], zoom: 1, mono: false },
-  frame: { src: '/avatar/frame.jpg', focus: [0.5, 0.5] as [number, number], zoom: 1, mono: false },
+  dev: { src: '/avatar/dev.jpg', focus: [0.5, 0.35] as [number, number], zoom: 1, mono: false, cutout: false },
+  // a cut-out (transparent background) on a soft studio backdrop; focus x = where the head is in the
+  // photo (0..1), so it lines up with the strap
+  frame: { src: '/avatar/frame.webp', focus: [0.5, 0] as [number, number], zoom: 1, mono: true, cutout: true },
 };
 
 /**
