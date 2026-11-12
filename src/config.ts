@@ -54,3 +54,16 @@ export const PHOTOS = {
  * holo   -> laminated with a holographic shimmer
  */
 export const CARD_FINISH: 'matte' | 'glossy' | 'holo' = 'glossy';
+
+/**
+ * Your clock. The page reads the time where you are (not the visitor's):
+ * night  -> the lights go down and the cursor becomes a flashlight, [from, to) in hours
+ * asleep -> the status in the corner says you are asleep
+ * Preview any hour with ?hour=22 in the URL.
+ */
+export const CLOCK = {
+  timeZone: 'Asia/Tokyo',
+  label: 'JST',
+  night: [19, 6] as [number, number],
+  asleep: [1, 7] as [number, number],
+};

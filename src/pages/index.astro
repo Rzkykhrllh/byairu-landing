@@ -8,7 +8,7 @@ import '@fontsource/cormorant-garamond/600-italic.css';
 import '@fontsource/inter-tight/400.css';
 import '@fontsource/inter-tight/500.css';
 import Lanyard from '../components/Lanyard';
-import { SITES } from '../config';
+import { SITES, CLOCK } from '../config';
 
 const title = 'Airu — Software Engineer & Photographer';
 const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street and travel photographer in Tokyo. Two passes, one person.';
@@ -41,6 +41,24 @@ const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street an
         } catch (e) {}
       })();
     </script>
+    <script is:inline define:vars={{ clock: CLOCK }}>
+      // Night by your clock (not the visitor's), and the visitor's saved sound choice, set before
+      // the first paint so the page never flashes the wrong colours. ?hour=22 previews an hour.
+      (function () {
+        var root = document.documentElement;
+        try {
+          var q = new URLSearchParams(location.search).get('hour');
+          var h = q !== null && q !== '' && !isNaN(+q)
+            ? ((+q % 24) + 24) % 24
+            : +new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: clock.timeZone }).format(new Date());
+          var inside = function (r) { return r[0] > r[1] ? h >= r[0] || h < r[1] : h >= r[0] && h < r[1]; };
+          root.dataset.hour = q !== null && q !== '' ? String(h) : '';
+          if (inside(clock.night)) root.classList.add('night');
+          if (inside(clock.asleep)) root.classList.add('asleep');
+        } catch (e) {}
+        try { if (localStorage.getItem('sound') === 'on') root.dataset.sound = 'on'; } catch (e) {}
+      })();
+    </script>
     <style is:global>
       :root {
         --bg: #f4f3f0;
@@ -53,6 +71,8 @@ const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street an
       @media (prefers-color-scheme: dark) {
         :root { --bg: #141518; --fg: #ececea; --muted: #7d8087; color-scheme: dark; }
       }
+      /* after hours where Airu is: the room goes dark and the cursor is a flashlight */
+      html.night { --bg: #0d0f14; --fg: #e9e6df; --muted: #6c7079; color-scheme: dark; }
       * { box-sizing: border-box; }
       html, body { margin: 0; height: 100%; }
       body { background: var(--bg); color: var(--fg); font-family: var(--mono); overflow: hidden; }
@@ -70,7 +90,18 @@ const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street an
       }
       .links a { color: var(--muted); text-decoration: none; padding-bottom: 3px; border-bottom: 1px solid transparent; transition: color .35s, border-color .35s; }
       .links a.on, .links a:hover { color: var(--fg); border-color: var(--fg); }
-      a:focus-visible { outline: 2px solid var(--fg); outline-offset: 4px; }
+      a:focus-visible, button:focus-visible { outline: 2px solid var(--fg); outline-offset: 4px; }
+
+      /* corner bits: the clock where Airu is, and the sound switch */
+      .corner {
+        position: absolute; top: max(16px, env(safe-area-inset-top)); z-index: 2;
+        font: 500 11px/1 var(--mono); color: var(--muted); letter-spacing: .02em;
+      }
+      .clock { left: 16px; display: flex; align-items: center; gap: 7px; }
+      .clock i { width: 6px; height: 6px; border-radius: 50%; background: #3fb27f; box-shadow: 0 0 0 3px color-mix(in srgb, #3fb27f 22%, transparent); }
+      html.asleep .clock i { background: transparent; box-shadow: inset -2px -1px 0 0 var(--muted); }
+      .sound { right: 16px; background: none; border: 0; padding: 0; cursor: pointer; transition: color .25s; }
+      .sound:hover, .sound[aria-pressed="true"] { color: var(--fg); }
 
       /* static fallback (no WebGL or reduced motion): both cards side by side */
       .fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 20px; padding: 24px 16px 80px; flex-wrap: wrap; overflow-y: auto; }
@@ -106,6 +137,8 @@ const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street an
           </a>
         </div>
       </div>
+      <p class="corner clock" aria-live="off"><i aria-hidden="true"></i><span id="clock"></span></p>
+      <button class="corner sound" id="sound" type="button" aria-pressed="false">sound off</button>
       <nav class="links" aria-label="Portfolios">
         <a id="l-dev" class="on" href={SITES.dev.url}>{SITES.dev.host} ↗</a>
         <a id="l-frame" href={SITES.frame.url}>{SITES.frame.host} ↗</a>
@@ -113,6 +146,43 @@ const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street an
     </main>
 
     <script>
+      import { CLOCK } from '../config';
+      import { unlockAudio, play } from '../lib/sfx';
+
+      // ---- clock: the time where Airu is, and whether Airu is likely awake ----
+      const root = document.documentElement;
+      const clockEl = document.getElementById('clock')!;
+      const fmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: CLOCK.timeZone });
+      const tick = () => {
+        let time = fmt.format(new Date());
+        if (root.dataset.hour) time = root.dataset.hour.padStart(2, '0') + time.slice(2); // ?hour= preview
+        clockEl.textContent = `${time} ${CLOCK.label} · ${root.classList.contains('asleep') ? 'asleep' : 'awake'}`;
+      };
+      tick();
+      setInterval(tick, 20_000);
+
+      // ---- sound switch (off by default, remembered per visitor) ----
+      const soundBtn = document.getElementById('sound')!;
+      const showSound = () => {
+        const on = root.dataset.sound === 'on';
+        soundBtn.textContent = on ? 'sound on' : 'sound off';
+        soundBtn.setAttribute('aria-pressed', String(on));
+      };
+      showSound();
+      soundBtn.addEventListener('click', () => {
+        const on = root.dataset.sound !== 'on';
+        if (on) root.dataset.sound = 'on';
+        else delete root.dataset.sound;
+        try { localStorage.setItem('sound', on ? 'on' : 'off'); } catch {}
+        if (on) {
+          unlockAudio();
+          play('grab');
+        }
+        showSound();
+      });
+      // a saved "on" still needs one tap somewhere before the browser allows audio
+      window.addEventListener('pointerdown', () => root.dataset.sound === 'on' && unlockAudio(), { once: true });
+
       const links = { dev: document.getElementById('l-dev')!, frame: document.getElementById('l-frame')! };
       window.addEventListener('lanyard:side', (e) => {
         const side = (e as CustomEvent<'dev' | 'frame'>).detail;

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
-import { Environment, Lightformer, RoundedBox } from '@react-three/drei';
+import { Environment, Lightformer, RoundedBox, SoftShadows } from '@react-three/drei';
 import {
   BallCollider,
   CuboidCollider,
@@ -15,6 +15,7 @@ import {
 } from '@react-three/rapier';
 import { makeTextures, FACE_ASPECT, type CardTextures } from '../lib/faces';
 import { CARD_FINISH, type Side } from '../config';
+import { play } from '../lib/sfx';
 
 // ---- card (world units) ----
 // No holder: the printed face is the card, edge to edge, with rounded corners.
@@ -81,10 +82,12 @@ export default function Lanyard() {
   }, []);
 
   if (!tex) return null;
+  const night = isNight();
 
   return (
     <Canvas
       flat
+      shadows="percentage"
       frameloop="demand"
       dpr={[1, 2]}
       gl={{ alpha: true, antialias: true }}
@@ -94,14 +97,34 @@ export default function Lanyard() {
       onCreated={() => requestAnimationFrame(() => document.documentElement.classList.add('has-3d'))}
     >
       <Responsive />
-      <ambientLight intensity={Math.PI * 0.9} />
-      <directionalLight position={[3, 5, 6]} intensity={0.5} />
+      <Look />
+      {/* real soft shadows (random samples, softer the farther from the card), not stepped copies */}
+      <SoftShadows size={45} samples={16} focus={0.4} />
+      <ambientLight intensity={Math.PI * (night ? NIGHT_AMBIENT : 0.9)} />
+      {night ? (
+        <Flashlight />
+      ) : (
+        <directionalLight
+          position={[3, 5, 6]}
+          intensity={0.5}
+          castShadow
+          shadow-mapSize={[1024, 1024]}
+          shadow-bias={-0.002}
+          shadow-camera-left={-8}
+          shadow-camera-right={8}
+          shadow-camera-top={8}
+          shadow-camera-bottom={-8}
+          shadow-camera-near={1}
+          shadow-camera-far={30}
+        />
+      )}
+      <Wall night={night} />
       {/* Physics steps in its own loop and only asks for a new frame while something moves,
           so a card at rest costs nothing. Extra solver iterations keep the rope from stretching. */}
       <Physics gravity={[0, GRAVITY, 0]} timeStep={1 / 60} numSolverIterations={8} updateLoop="independent">
-        <Badge tex={tex} />
+        <Badge tex={tex} night={night} />
       </Physics>
-      <Environment resolution={256}>
+      <Environment resolution={256} environmentIntensity={night ? 0.3 : 1}>
         <group rotation={[-Math.PI / 3, 0, 1]}>
           <Lightformer form="circle" intensity={4} rotation-x={Math.PI / 2} position={[0, 5, -9]} scale={2} />
           <Lightformer form="circle" intensity={2} rotation-y={Math.PI / 2} position={[-5, 1, -1]} scale={2} />
@@ -134,6 +157,148 @@ function Responsive() {
     invalidate();
   }, [camera, size, invalidate]);
   return null;
+}
+
+// ---- light, shadow and shine ----
+const WALL_Z = -1.2; // the page is a wall just behind the card; its shadow falls here
+const NIGHT_AMBIENT = 0.25; // share of the daytime room light left at night
+
+/** The page sets <html class="night"> from your clock (see CLOCK in config). */
+const isNight = () => document.documentElement.classList.contains('night');
+
+/**
+ * Where the visitor is "looking from": the pointer on desktop, the phone's tilt on mobile,
+ * both as -1..1 across the screen. `x, y` ease towards `tx, ty`; the shine and flashlight read them.
+ */
+const look = { x: 0, y: 0, tx: 0, ty: 0 };
+
+function Look() {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      look.tx = (e.clientX / innerWidth) * 2 - 1;
+      look.ty = -((e.clientY / innerHeight) * 2 - 1);
+      invalidate();
+    };
+    const onTilt = (e: DeviceOrientationEvent) => {
+      if (e.gamma == null || e.beta == null) return;
+      look.tx = THREE.MathUtils.clamp(e.gamma / 30, -1, 1);
+      look.ty = THREE.MathUtils.clamp((50 - e.beta) / 30, -1, 1);
+      invalidate();
+    };
+    // iOS only hands out tilt after asking, and only inside a tap
+    const DOE = window.DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> } | undefined;
+    const ask = () => DOE?.requestPermission?.().catch(() => {});
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('deviceorientation', onTilt);
+    window.addEventListener('touchend', ask, { once: true });
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('deviceorientation', onTilt);
+      window.removeEventListener('touchend', ask);
+    };
+  }, [invalidate]);
+  useFrame((state, delta) => {
+    const k = Math.min(1, delta * 7);
+    look.x += (look.tx - look.x) * k;
+    look.y += (look.ty - look.y) * k;
+    if (Math.abs(look.tx - look.x) + Math.abs(look.ty - look.y) > 0.002) state.invalidate();
+  });
+  return null;
+}
+
+/** At night: a torch held by the visitor, aimed at the pointer. The card's shadow swings on the wall. */
+function Flashlight() {
+  const { camera } = useThree();
+  const light = useRef<THREE.SpotLight>(null!);
+  const tmp = useMemo(
+    () => ({ target: new THREE.Object3D(), ray: new THREE.Raycaster(), ndc: new THREE.Vector2(), plane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), hit: new THREE.Vector3() }),
+    [],
+  );
+  useFrame(() => {
+    tmp.ndc.set(look.x, look.y);
+    tmp.ray.setFromCamera(tmp.ndc, camera);
+    if (!tmp.ray.ray.intersectPlane(tmp.plane, tmp.hit)) return;
+    tmp.target.position.copy(tmp.hit);
+    tmp.target.updateMatrixWorld();
+    // held a little below and in front of the screen, so the shadow drops down and away from it
+    light.current.position.set(tmp.hit.x * 0.3 - 1.6, tmp.hit.y * 0.3 - 2.6, 8);
+  });
+  return (
+    <>
+      <primitive object={tmp.target} />
+      <spotLight
+        ref={light}
+        target={tmp.target}
+        angle={0.3}
+        penumbra={0.85}
+        decay={0}
+        intensity={Math.PI * 0.7}
+        color="#fff3dc"
+        castShadow
+        shadow-mapSize={[1024, 1024]}
+        shadow-bias={-0.002}
+        shadow-camera-near={2}
+        shadow-camera-far={30}
+      />
+    </>
+  );
+}
+
+/**
+ * The page behind the card. By day it is invisible and only catches the card's soft shadow.
+ * At night it is a dark wall that the flashlight lights up, painted so the unlit part matches
+ * the page colour exactly (the room light scales it by NIGHT_AMBIENT).
+ */
+function Wall({ night }: { night: boolean }) {
+  const color = useMemo(() => {
+    if (!night) return null;
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#0d0f14';
+    return new THREE.Color(bg).multiplyScalar(1 / NIGHT_AMBIENT);
+  }, [night]);
+  const dark = useMemo(() => matchMedia('(prefers-color-scheme: dark)').matches, []);
+  return (
+    <mesh position={[0, 0, WALL_Z]} receiveShadow raycast={() => null}>
+      <planeGeometry args={[300, 300]} />
+      {color ? (
+        <meshStandardMaterial color={color} roughness={1} metalness={0} envMapIntensity={0} />
+      ) : (
+        <shadowMaterial transparent opacity={dark ? 0.32 : 0.13} />
+      )}
+    </mesh>
+  );
+}
+
+/**
+ * A light streak over a face of the card that slides with the pointer (or phone tilt) and with how
+ * the card is turned, like the sheen on a laminated pass. Additive, so it only ever brightens.
+ */
+function makeShine() {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    uniforms: { uPos: { value: 0 }, uStrength: { value: 0 }, uFlip: { value: 1 } },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */ `
+      uniform float uPos, uStrength, uFlip;
+      varying vec2 vUv;
+      vec3 hue(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
+      void main() {
+        vec2 p = vUv - 0.5;
+        p.x *= uFlip;
+        float d = dot(p, normalize(vec2(1.0, 1.5))) - uPos;
+        float core = exp(-d * d / 0.0025);
+        float halo = exp(-d * d / 0.03);
+        vec3 tint = mix(vec3(1.0), hue(fract(d * 3.0 + 0.55)), 0.55);
+        gl_FragColor = vec4((vec3(core) * 0.8 + tint * halo * 0.45) * uStrength, 1.0);
+      }`,
+  });
 }
 
 /** Rounded rectangle, with UVs stretched over its bounds so a texture covers it edge to edge. */
@@ -255,7 +420,7 @@ function smooth(ref: Ref, delta: number) {
   return body.lerped;
 }
 
-function Badge({ tex }: { tex: CardTextures }) {
+function Badge({ tex, night }: { tex: CardTextures; night: boolean }) {
   const top = useRef<Body>(null!);
   const rope = [useRef<Body>(null!), useRef<Body>(null!), useRef<Body>(null!), useRef<Body>(null!)];
   const card = useRef<Body>(null!);
@@ -318,7 +483,9 @@ function Badge({ tex }: { tex: CardTextures }) {
   const wake = () => [card, ...rope].forEach((r) => r.current?.wakeUp());
 
   const turnTo = (s: Side) => {
-    target.current = s === 'frame' ? Math.PI : 0;
+    const t = s === 'frame' ? Math.PI : 0;
+    if (t !== target.current) play('flip');
+    target.current = t;
     flippedOnce.current = true;
     wake();
   };
@@ -388,6 +555,7 @@ function Badge({ tex }: { tex: CardTextures }) {
         const v = new THREE.Vector2((b.x - a.x) / dt, (b.y - a.y) / dt);
         if (v.length() > THROW_MAX) v.setLength(THROW_MAX);
         throwVel.current = { x: v.x, y: v.y };
+        if (v.length() > 4) play('whoosh', v.length() / THROW_MAX);
       }
       d.samples.length = 0;
       dragRef.current = false;
@@ -402,6 +570,7 @@ function Badge({ tex }: { tex: CardTextures }) {
 
     dragRef.current = true;
     setDragging(true);
+    play('grab');
     wake();
   };
 
@@ -485,6 +654,12 @@ function Badge({ tex }: { tex: CardTextures }) {
   });
 
   const ribbon = useRibbon();
+  const shine = useMemo(() => {
+    const front = makeShine();
+    const back = makeShine();
+    back.uniforms.uFlip.value = -1;
+    return { front, back, e: new THREE.Euler() };
+  }, []);
 
   // ---- runs per rendered frame: draw the strap from where the bodies are ----
   useFrame((_, delta) => {
@@ -503,9 +678,19 @@ function Badge({ tex }: { tex: CardTextures }) {
     curve.points[ROPE_POINTS + 1].copy(top.current.translation() as THREE.Vector3);
     curve.updateArcLengths(); // three caches arc lengths; stale ones skew the strap texture and twist
     ribbon.update(curve, yawU.current, tmp.q);
+
+    // the sheen slides with the visitor's pointer and with how the card is turned and tilted
+    shine.e.setFromQuaternion(tmp.q, 'YXZ');
+    const turn = Math.sin(shine.e.y) * 0.55 + shine.e.z * 0.5;
+    const base = look.x * 0.32 - look.y * 0.22;
+    const strength = night ? 0.12 : 0.24;
+    shine.front.uniforms.uPos.value = base + turn;
+    shine.back.uniforms.uPos.value = base - turn;
+    shine.front.uniforms.uStrength.value = shine.back.uniforms.uStrength.value = strength;
   });
 
-  const finish = FINISHES[CARD_FINISH];
+  // at night the laminate scatters the torch a little, so its glare never hides the print
+  const finish = night ? { ...FINISHES[CARD_FINISH], clearcoatRoughness: 0.4 } : FINISHES[CARD_FINISH];
   const matte = { roughness: 0.85, metalness: 0, envMapIntensity: 0.25 };
   const metal = { color: '#c9cdd2', metalness: 0.8, roughness: 0.3, envMapIntensity: 1 };
 
@@ -541,17 +726,19 @@ function Badge({ tex }: { tex: CardTextures }) {
             onPointerDown={onDown}
           >
             {/* card edge */}
-            <mesh geometry={geo.body}>
+            <mesh geometry={geo.body} castShadow>
               <meshStandardMaterial color="#e9e7e2" {...matte} />
             </mesh>
             {/* engineer side */}
             <mesh geometry={geo.face} position={[0, 0, CARD_D / 2 + 0.001]}>
               <meshPhysicalMaterial map={tex.dev} {...finish} />
             </mesh>
+            <mesh geometry={geo.face} position={[0, 0, CARD_D / 2 + 0.0015]} material={shine.front} />
             {/* photographer side */}
             <mesh geometry={geo.face} position={[0, 0, -CARD_D / 2 - 0.001]} rotation={[0, Math.PI, 0]}>
               <meshPhysicalMaterial map={tex.frame} {...finish} />
             </mesh>
+            <mesh geometry={geo.face} position={[0, 0, -CARD_D / 2 - 0.0015]} rotation={[0, Math.PI, 0]} material={shine.back} />
             {/* punched slot, both sides */}
             {[1, -1].map((s) => (
               <mesh
@@ -564,12 +751,12 @@ function Badge({ tex }: { tex: CardTextures }) {
               </mesh>
             ))}
             {/* ring through the slot */}
-            <mesh position={[0, CARD_H / 2 + 0.04, 0]} rotation={[0, Math.PI / 2, 0]}>
+            <mesh position={[0, CARD_H / 2 + 0.04, 0]} rotation={[0, Math.PI / 2, 0]} castShadow>
               <torusGeometry args={[0.15, 0.022, 12, 32]} />
               <meshStandardMaterial {...metal} />
             </mesh>
             {/* metal clamp the strap is crimped into */}
-            <RoundedBox args={[STRAP_W + 0.08, 0.26, 0.09]} radius={0.035} smoothness={3} position={[0, CLAMP_Y, 0]}>
+            <RoundedBox args={[STRAP_W + 0.08, 0.26, 0.09]} radius={0.035} smoothness={3} position={[0, CLAMP_Y, 0]} castShadow>
               <meshStandardMaterial {...metal} />
             </RoundedBox>
             <mesh position={[0, CLAMP_Y - 0.17, 0]}>
@@ -580,7 +767,7 @@ function Badge({ tex }: { tex: CardTextures }) {
         </RigidBody>
       </group>
 
-      <mesh geometry={ribbon.geometry} frustumCulled={false}>
+      <mesh geometry={ribbon.geometry} frustumCulled={false} castShadow>
         <meshStandardMaterial map={tex.strap.tex} side={THREE.DoubleSide} roughness={0.9} metalness={0} envMapIntensity={0.3} />
       </mesh>
     </>
