@@ -24,7 +24,7 @@ Everything you will usually change is in `src/config.ts`:
 - names, roles and URLs of both sides, in English and Japanese
 - the two card photos and how they are cropped
 
-Photos: the engineer side shows the Airu sprite in `public/avatar/airu-idle.webp` (or `public/avatar/dev.jpg` if it exists). The photographer side shows the cut-out portrait `public/avatar/frame.webp` (made from `airu.png`, which stays out of the repo) on a studio backdrop. Use `focus` and `zoom` in the config to frame your face. `CARD_FINISH` sets the card surface (matte, glossy, holo).
+Photos: the engineer side shows the Airu sprite in `public/avatar/airu-idle.webp` (or `public/avatar/dev.jpg` if it exists). The photographer side shows the cut-out portrait `public/avatar/airu-camera.webp` (made from `airu.png`, which stays out of the repo) on a studio backdrop. Use `focus` and `zoom` in the config to frame your face. `CARD_FINISH` sets the card surface (matte, glossy, holo).
 
 ## How the lanyard moves
 

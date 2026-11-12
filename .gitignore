@@ -3,3 +3,7 @@ dist/
 .astro/
 .DS_Store
 .env
+
+# source photos (large originals; the site uses the processed .webp in public/avatar)
+airu.png
+DSCF*.jpg

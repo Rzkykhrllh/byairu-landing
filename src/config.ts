@@ -43,9 +43,9 @@ export const PLAYER_SPRITE = '/avatar/airu-idle.webp';
 
 export const PHOTOS = {
   dev: { src: '/avatar/dev.jpg', focus: [0.5, 0.35] as [number, number], zoom: 1, mono: false, cutout: false },
-  // a cut-out (transparent background) on a soft studio backdrop; focus x = where the head is in the
-  // photo (0..1), so it lines up with the strap
-  frame: { src: '/avatar/frame.webp', focus: [0.5, 0] as [number, number], zoom: 1, mono: true, cutout: true },
+  // a cut-out (transparent background) on a soft studio backdrop; focus x = the point of the photo
+  // (0..1) that lines up with the strap
+  frame: { src: '/avatar/airu-camera.webp', focus: [0.5, 0] as [number, number], zoom: 1, mono: true, cutout: true },
 };
 
 /**
