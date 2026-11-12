@@ -38,6 +38,19 @@ All of it lives in `src/components/Lanyard.tsx`, with the knobs at the top of th
 
 The card faces are drawn on a canvas in `src/lib/faces.ts` (one function per side), so layout changes happen there.
 
+## Tokyo time
+
+The page follows the clock in Tokyo (`CLOCK` in `src/config.ts`):
+
+- **Street.** Behind the sprite on the engineer side is a pixel Tokyo street (`src/lib/scene.ts`): the sky, lights and Tokyo Tower change with the hour, the tree and what is in the air with the season (sakura, summer fireworks, autumn maple, falling snow in winter).
+- **Night.** From 20:00 the page goes dark; from 00:00 to 04:00 the room lights go off and the cursor becomes a flashlight.
+- **Picker.** The time in the top-left corner opens a slider for the hour and icons for the season, so visitors can see any of them. `?hour=22&month=4` in the URL does the same.
+- **All scenes.** On the dev server, `/scenes` shows every hour and month side by side (it is not part of the built site).
+
+## Deploy
+
+`Dockerfile` builds the static site and serves it with nginx (`nginx.conf`): the landing page at `/`, long-cached hashed assets, and every other unknown path redirected to the same path on frame.byairu.com (old photo-site URLs). In Dokploy, use the Dockerfile build type and expose port 80.
+
 Visitors without WebGL, or with reduced motion turned on, get a static two-card version with the same links.
 
 ## Deploy (Dokploy)

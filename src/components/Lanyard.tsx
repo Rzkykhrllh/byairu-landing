@@ -13,7 +13,8 @@ import {
   type RapierRigidBody,
   type RigidBodyProps,
 } from '@react-three/rapier';
-import { makeTextures, FACE_ASPECT, type CardTextures } from '../lib/faces';
+import { makeDevTexture, makeTextures, ownerTime, FACE_ASPECT, PORTRAIT, type CardTextures } from '../lib/faces';
+import { seasonOf } from '../lib/scene';
 import { CARD_FINISH, type Side } from '../config';
 import { play } from '../lib/sfx';
 
@@ -81,8 +82,27 @@ export default function Lanyard() {
     };
   }, []);
 
+  // the visitor picked another time or season (or the hour turned): redraw the engineer side,
+  // and re-read whether it is torch time
+  const [clock, setClock] = useState(0);
+  useEffect(() => {
+    const onTime = () => {
+      setClock((k) => k + 1);
+      makeDevTexture().then((dev) =>
+        setTex((prev) => {
+          if (!prev) return prev;
+          prev.dev.dispose();
+          return { ...prev, dev };
+        }),
+      );
+    };
+    window.addEventListener('lanyard:time', onTime);
+    return () => window.removeEventListener('lanyard:time', onTime);
+  }, []);
+
   if (!tex) return null;
-  const night = isNight();
+  const night = isTorch();
+  const winter = seasonOf(ownerTime().month) === 'winter'; // deep night: flashlight mode (an ordinary dark evening only changes the page colour)
 
   return (
     <Canvas
@@ -118,11 +138,11 @@ export default function Lanyard() {
           shadow-camera-far={30}
         />
       )}
-      <Wall night={night} />
+      <Wall key={clock} night={night} />
       {/* Physics steps in its own loop and only asks for a new frame while something moves,
           so a card at rest costs nothing. Extra solver iterations keep the rope from stretching. */}
       <Physics gravity={[0, GRAVITY, 0]} timeStep={1 / 60} numSolverIterations={8} updateLoop="independent">
-        <Badge tex={tex} night={night} />
+        <Badge tex={tex} night={night} winter={winter} />
       </Physics>
       <Environment resolution={256} environmentIntensity={night ? 0.3 : 1}>
         <group rotation={[-Math.PI / 3, 0, 1]}>
@@ -163,8 +183,8 @@ function Responsive() {
 const WALL_Z = -1.2; // the page is a wall just behind the card; its shadow falls here
 const NIGHT_AMBIENT = 0.25; // share of the daytime room light left at night
 
-/** The page sets <html class="night"> from your clock (see CLOCK in config). */
-const isNight = () => document.documentElement.classList.contains('night');
+/** The page sets <html class="torch"> in the small hours, from your clock (see CLOCK in config). */
+const isTorch = () => document.documentElement.classList.contains('torch');
 
 /**
  * Where the visitor is "looking from": the pointer on desktop, the phone's tilt on mobile,
@@ -207,7 +227,7 @@ function Look() {
   return null;
 }
 
-/** At night: a torch held by the visitor, aimed at the pointer. The card's shadow swings on the wall. */
+/** Deep night: a torch held by the visitor, aimed at the pointer. The card's shadow swings on the wall. */
 function Flashlight() {
   const { camera } = useThree();
   const light = useRef<THREE.SpotLight>(null!);
@@ -247,7 +267,7 @@ function Flashlight() {
 
 /**
  * The page behind the card. By day it is invisible and only catches the card's soft shadow.
- * At night it is a dark wall that the flashlight lights up, painted so the unlit part matches
+ * In the small hours it is a dark wall that the flashlight lights up, painted so the unlit part matches
  * the page colour exactly (the room light scales it by NIGHT_AMBIENT).
  */
 function Wall({ night }: { night: boolean }) {
@@ -256,7 +276,8 @@ function Wall({ night }: { night: boolean }) {
     const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#0d0f14';
     return new THREE.Color(bg).multiplyScalar(1 / NIGHT_AMBIENT);
   }, [night]);
-  const dark = useMemo(() => matchMedia('(prefers-color-scheme: dark)').matches, []);
+  // on a dark page (dark mode, or evening where Airu is) the shadow needs more weight to show
+  const dark = useMemo(() => matchMedia('(prefers-color-scheme: dark)').matches || document.documentElement.classList.contains('night'), []);
   return (
     <mesh position={[0, 0, WALL_Z]} receiveShadow raycast={() => null}>
       <planeGeometry args={[300, 300]} />
@@ -299,6 +320,85 @@ function makeShine() {
         gl_FragColor = vec4((vec3(core) * 0.8 + tint * halo * 0.45) * uStrength, 1.0);
       }`,
   });
+}
+
+// ---- winter: snow falling in the sprite's window ----
+const SNOW_FPS = 15; // pixel snow does not need more, and it keeps the GPU calm
+const SNOW_FLAKES = 34;
+
+/**
+ * Snow falling over the Tokyo street in the engineer side's window. A small transparent canvas laid
+ * on the card face, redrawn a few times a second only while it is winter where Airu is, the
+ * engineer side faces the viewer and the tab is visible.
+ */
+function Snow() {
+  const invalidate = useThree((s) => s.invalidate);
+  const K = 4; // texture pixels per card pixel
+  const inset = 2; // stay inside the window's border
+  const { x, y, w, h, px: FW, py: FH } = PORTRAIT;
+  const tw = w - inset * 2, th = h - inset * 2;
+
+  const { canvas, tex, flakes } = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = tw * K;
+    canvas.height = th * K;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.magFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    const flakes = Array.from({ length: SNOW_FLAKES }, () => ({
+      x: Math.random() * tw,
+      y: Math.random() * th,
+      speed: 5 + Math.random() * 8, // card pixels per second
+      size: Math.random() < 0.3 ? 2 : 1,
+      phase: Math.random() * Math.PI * 2,
+      alpha: 0.65 + Math.random() * 0.35,
+    }));
+    return { canvas, tex, flakes };
+  }, [tw, th]);
+
+  useEffect(() => {
+    const g = canvas.getContext('2d')!;
+    let facing = true;
+    let last = performance.now();
+    const onSide = (e: Event) => (facing = (e as CustomEvent<Side>).detail === 'dev');
+    window.addEventListener('lanyard:side', onSide);
+    const id = setInterval(() => {
+      const now = performance.now();
+      const dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      if (document.hidden || !facing) return;
+      g.clearRect(0, 0, canvas.width, canvas.height);
+      for (const f of flakes) {
+        f.y += f.speed * dt;
+        f.phase += dt * 1.6;
+        if (f.y > th) {
+          f.y = -2;
+          f.x = Math.random() * tw;
+        }
+        const fx = Math.round(f.x + Math.sin(f.phase) * 1.3);
+        g.fillStyle = `rgba(255,255,255,${f.alpha})`;
+        g.fillRect(fx * K, Math.round(f.y) * K, f.size * K, f.size * K);
+      }
+      tex.needsUpdate = true;
+      invalidate();
+    }, 1000 / SNOW_FPS);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('lanyard:side', onSide);
+      tex.dispose();
+    };
+  }, [canvas, tex, flakes, tw, th, invalidate]);
+
+  // card pixels -> the card's local space (the face spans CARD_W x CARD_H, centred)
+  const cx = ((x + inset + tw / 2) / FW - 0.5) * CARD_W;
+  const cy = (0.5 - (y + inset + th / 2) / FH) * CARD_H;
+  return (
+    <mesh position={[cx, cy, CARD_D / 2 + 0.0013]} raycast={() => null}>
+      <planeGeometry args={[(tw / FW) * CARD_W, (th / FH) * CARD_H]} />
+      <meshBasicMaterial map={tex} transparent depthWrite={false} toneMapped={false} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
+    </mesh>
+  );
 }
 
 /** Rounded rectangle, with UVs stretched over its bounds so a texture covers it edge to edge. */
@@ -420,7 +520,7 @@ function smooth(ref: Ref, delta: number) {
   return body.lerped;
 }
 
-function Badge({ tex, night }: { tex: CardTextures; night: boolean }) {
+function Badge({ tex, night, winter }: { tex: CardTextures; night: boolean; winter: boolean }) {
   const top = useRef<Body>(null!);
   const rope = [useRef<Body>(null!), useRef<Body>(null!), useRef<Body>(null!), useRef<Body>(null!)];
   const card = useRef<Body>(null!);
@@ -733,6 +833,7 @@ function Badge({ tex, night }: { tex: CardTextures; night: boolean }) {
             <mesh geometry={geo.face} position={[0, 0, CARD_D / 2 + 0.001]}>
               <meshPhysicalMaterial map={tex.dev} {...finish} />
             </mesh>
+            {winter && <Snow />}
             <mesh geometry={geo.face} position={[0, 0, CARD_D / 2 + 0.0015]} material={shine.front} />
             {/* photographer side */}
             <mesh geometry={geo.face} position={[0, 0, -CARD_D / 2 - 0.001]} rotation={[0, Math.PI, 0]}>

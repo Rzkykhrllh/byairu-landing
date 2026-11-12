@@ -1,0 +1,121 @@
+---
+// Development only (added as /scenes by astro.config.mjs when running `astro dev`, never built):
+// every time of day x every month of the street behind the engineer sprite.
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Tokyo scenes</title>
+    <style is:global>
+      :root { --bg: #f4f3f0; --fg: #1d1e22; --muted: #8a8c92; --line: #e2e1dc; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #141518; --fg: #ececea; --muted: #7d8087; --line: #2a2b30; } }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 12px/1.5 'JetBrains Mono', ui-monospace, Menlo, monospace; }
+      header { padding: 20px 16px 8px; display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline; }
+      h1 { font-size: 14px; margin: 0; }
+      header p { margin: 0; color: var(--muted); }
+      label { color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+      .wrap { overflow-x: auto; padding: 8px 16px 32px; }
+      table { border-collapse: collapse; }
+      th { font-weight: 500; color: var(--muted); padding: 4px 6px; text-align: left; white-space: nowrap; }
+      th.season { color: var(--fg); }
+      td { padding: 4px; }
+      a { display: block; line-height: 0; border-radius: 4px; outline-offset: 2px; }
+      a:hover canvas, a:focus-visible canvas { box-shadow: 0 0 0 2px var(--fg); }
+      canvas { width: 108px; height: 138px; image-rendering: pixelated; border-radius: 3px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Tokyo scenes</h1>
+      <p>rows: time of day · columns: month · click one to open the card at that hour and month</p>
+      <label><input type="checkbox" id="sprite" checked /> show Airu</label>
+    </header>
+    <div class="wrap"><table id="grid"></table></div>
+
+    <script>
+      import { drawTokyo, seasonOf } from '../lib/scene';
+      import { PLAYER_SPRITE } from '../config';
+
+      // one hour inside each part of the day, plus the edges where the look changes
+      const HOURS: [number, string][] = [
+        [5, 'dawn 04–06'],
+        [7, 'morning 06–09'],
+        [13, 'day 09–16'],
+        [17, 'golden 16–18'],
+        [19, 'dusk 18–20'],
+        [22, 'night 20–04'],
+      ];
+      const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const W = 72, H = 92, K = 3; // card pixels, drawn 3x for a crisp look
+
+      const grid = document.getElementById('grid') as HTMLTableElement;
+      const toggle = document.getElementById('sprite') as HTMLInputElement;
+      const sprite = new Image();
+      sprite.src = PLAYER_SPRITE;
+
+      function tile(hour: number, month: number) {
+        const c = document.createElement('canvas');
+        c.width = W * K;
+        c.height = H * K;
+        const g = c.getContext('2d')!;
+        g.scale(K, K);
+        const floor = Math.round(H - Math.max(14, H * 0.2));
+        drawTokyo(g, 0, 0, W, H, floor, hour, month);
+        if (seasonOf(month) === 'winter') {
+          // on the card this snow falls (see Snow in Lanyard.tsx); here, one still frame of it
+          g.fillStyle = 'rgba(255,255,255,.85)';
+          for (let i = 0; i < 34; i++) {
+            const s = Math.random() < 0.3 ? 2 : 1;
+            g.fillRect(Math.round(2 + Math.random() * (W - 4)), Math.round(2 + Math.random() * (H - 4)), s, s);
+          }
+        }
+        if (toggle.checked && sprite.complete && sprite.naturalWidth) {
+          // same placement as on the card
+          const sh = H * 0.8, sw = (sprite.width / sprite.height) * sh;
+          const feet = floor + (H - floor) * 0.55;
+          g.fillStyle = 'rgba(15,23,42,.18)';
+          g.beginPath();
+          g.ellipse(W / 2, feet - sh * 0.01, sw * 0.4, sh * 0.035, 0, 0, Math.PI * 2);
+          g.fill();
+          g.imageSmoothingQuality = 'high';
+          g.drawImage(sprite, W / 2 - sw / 2, feet - sh, sw, sh);
+        }
+        return c;
+      }
+
+      function render() {
+        grid.replaceChildren();
+        const head = grid.insertRow();
+        head.appendChild(document.createElement('th'));
+        MONTHS.forEach((m, i) => {
+          const th = document.createElement('th');
+          th.className = 'season';
+          th.textContent = `${m} · ${seasonOf(i + 1)}`;
+          head.appendChild(th);
+        });
+        for (const [hour, label] of HOURS) {
+          const row = grid.insertRow();
+          const th = document.createElement('th');
+          th.textContent = label;
+          row.appendChild(th);
+          MONTHS.forEach((m, i) => {
+            const a = document.createElement('a');
+            a.href = `/?hour=${hour}&month=${i + 1}`;
+            a.title = `${label}, ${m}`;
+            a.appendChild(tile(hour, i + 1));
+            row.insertCell().appendChild(a);
+          });
+        }
+      }
+
+      toggle.addEventListener('change', render);
+      sprite.onload = render;
+      sprite.onerror = render;
+    </script>
+  </body>
+</html>

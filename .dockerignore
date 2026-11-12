@@ -2,3 +2,7 @@ node_modules
 dist
 .astro
 .git
+
+# source photos, not needed to build the site
+airu.png
+DSCF*.jpg

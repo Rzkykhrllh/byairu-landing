@@ -48,14 +48,17 @@ const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street an
       (function () {
         var root = document.documentElement;
         try {
-          var q = new URLSearchParams(location.search).get('hour');
+          var params = new URLSearchParams(location.search);
+          var q = params.get('hour');
+          var m = +(params.get('month') || '');
+          if (m >= 1 && m <= 12) root.dataset.month = String(m);
           var h = q !== null && q !== '' && !isNaN(+q)
             ? ((+q % 24) + 24) % 24
             : +new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: clock.timeZone }).format(new Date());
           var inside = function (r) { return r[0] > r[1] ? h >= r[0] || h < r[1] : h >= r[0] && h < r[1]; };
           root.dataset.hour = q !== null && q !== '' ? String(h) : '';
           if (inside(clock.night)) root.classList.add('night');
-          if (inside(clock.asleep)) root.classList.add('asleep');
+          if (inside(clock.torch)) root.classList.add('torch');
         } catch (e) {}
         try { if (localStorage.getItem('sound') === 'on') root.dataset.sound = 'on'; } catch (e) {}
       })();
@@ -98,9 +101,91 @@ const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street an
         position: absolute; top: max(16px, env(safe-area-inset-top)); z-index: 2;
         font: 500 11px/1 var(--mono); color: var(--muted); letter-spacing: .02em;
       }
-      .clock { left: 16px; display: flex; align-items: center; gap: 7px; }
-      .clock i { width: 6px; height: 6px; border-radius: 50%; background: #3fb27f; box-shadow: 0 0 0 3px color-mix(in srgb, #3fb27f 22%, transparent); }
-      html.asleep .clock i { background: transparent; box-shadow: inset -2px -1px 0 0 var(--muted); }
+      .clock { left: 16px; margin-top: -6px; }
+      /* the whole line is one button: the sky right now, the time, and a small chevron */
+      .sky-btn {
+        display: flex; align-items: center; gap: 8px; margin-left: -6px; padding: 4px 10px 4px 4px;
+        font: inherit; color: var(--muted); cursor: pointer; background: none;
+        border: 1px solid transparent; border-radius: 999px;
+        transition: color .2s, background .2s, border-color .2s;
+      }
+      .sky-btn .disc {
+        display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+        border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
+        background: color-mix(in srgb, var(--fg) 3%, transparent);
+      }
+      .sky-btn svg { width: 14px; height: 14px; overflow: visible; }
+      .sky-btn .chev { width: 8px; height: 8px; opacity: .55; transition: transform .25s, opacity .2s; }
+      .sky-btn:hover, .sky-btn[aria-expanded="true"] {
+        color: var(--fg);
+        background: color-mix(in srgb, var(--fg) 5%, transparent);
+        border-color: color-mix(in srgb, var(--fg) 14%, transparent);
+      }
+      .sky-btn:hover .chev { opacity: 1; transform: translateY(1px); }
+      .sky-btn[aria-expanded="true"] .chev { opacity: 1; transform: rotate(180deg); }
+      .sky-btn [data-sky] { display: none; }
+      .sky-btn[data-now="day"] [data-sky="day"], .sky-btn[data-now="low"] [data-sky="low"], .sky-btn[data-now="night"] [data-sky="night"] { display: block; }
+      /* a little life: the sun turns, the stars twinkle, and one hop once the card has landed */
+      @media (prefers-reduced-motion: no-preference) {
+        .sky-btn .rays { transform-origin: 8px 8px; animation: spin 24s linear infinite; }
+        .sky-btn .twinkle { animation: twinkle 2.4s ease-in-out infinite; }
+        .sky-btn .twinkle + .twinkle { animation-delay: 1.2s; }
+        html.has-3d .sky-btn .disc { animation: hop .7s cubic-bezier(.3,1.6,.5,1) 1.4s both; }
+        .sky-btn:hover svg { transform: scale(1.12); transition: transform .25s; }
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes twinkle { 50% { opacity: .2; } }
+      @keyframes hop { 0%, 100% { transform: none; } 40% { transform: translateY(-4px) scale(1.06); } }
+      /* the time / season picker under the clock */
+      .time-panel {
+        position: absolute; top: 34px; left: -6px; width: max-content; max-width: calc(100vw - 16px);
+        padding: 12px 12px 6px; border-radius: 10px; background: var(--bg);
+        border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+        box-shadow: 0 10px 30px rgba(0,0,0,.12);
+      }
+      .time-panel[hidden] { display: none; }
+      .time-panel p { margin: 0 0 6px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+      .time-panel output { margin-left: 6px; color: var(--fg); letter-spacing: 0; }
+      .time-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; width: 300px; max-width: calc(100vw - 40px); }
+      /* the track is the sky over a day in Tokyo, stops on the same hours as the street (src/lib/scene.ts):
+         night to 04, dawn 04–06, morning 06–09, day 09–16, golden 16–18, dusk 18–20, night from 20 */
+      #time-range {
+        flex: 1; min-width: 0; height: 18px; margin: 0; background: none; cursor: pointer;
+        -webkit-appearance: none; appearance: none;
+      }
+      #time-range::-webkit-slider-runnable-track {
+        height: 6px; border-radius: 999px;
+        background: linear-gradient(90deg, #10183a 0%, #10183a 16.7%, #d898a8 20.8%, #9fd0f4 31%, #6fb5ee 45%, #6fb5ee 66.7%, #f2bd7a 70.8%, #a8577a 79.2%, #10183a 83.3%, #10183a 100%);
+      }
+      #time-range::-moz-range-track {
+        height: 6px; border-radius: 999px;
+        background: linear-gradient(90deg, #10183a 0%, #10183a 16.7%, #d898a8 20.8%, #9fd0f4 31%, #6fb5ee 45%, #6fb5ee 66.7%, #f2bd7a 70.8%, #a8577a 79.2%, #10183a 83.3%, #10183a 100%);
+      }
+      #time-range::-webkit-slider-thumb {
+        -webkit-appearance: none; width: 16px; height: 16px; margin-top: -5px; border-radius: 50%;
+        background: var(--bg); border: 2px solid var(--fg); box-shadow: 0 1px 4px rgba(0,0,0,.25);
+      }
+      #time-range::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--bg); border: 2px solid var(--fg); }
+      #time-range:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; border-radius: 4px; }
+      .reset {
+        font: 500 11px/1 var(--mono); color: var(--muted); background: none; border: 0; padding: 4px 0;
+        cursor: pointer; white-space: nowrap; transition: color .2s;
+      }
+      .reset:hover, .reset[aria-pressed="true"] { color: var(--fg); }
+      .reset[aria-pressed="true"] { cursor: default; }
+      .seasons { display: flex; gap: 6px; margin-bottom: 10px; }
+      .seasons button {
+        display: grid; place-items: center; width: 38px; height: 34px; padding: 0; cursor: pointer;
+        font: 500 10px/1 var(--mono); color: var(--muted); background: none;
+        border: 1px solid transparent; border-radius: 8px; transition: background .2s, border-color .2s, color .2s;
+      }
+      .seasons button svg { width: 18px; height: 18px; transition: transform .2s; }
+      .seasons button:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); color: var(--fg); }
+      .seasons button:hover svg { transform: scale(1.1); }
+      .seasons button[aria-pressed="true"] {
+        background: color-mix(in srgb, var(--fg) 9%, transparent);
+        border-color: color-mix(in srgb, var(--fg) 35%, transparent); color: var(--fg);
+      }
       .sound { right: 16px; background: none; border: 0; padding: 0; cursor: pointer; transition: color .25s; }
       .sound:hover, .sound[aria-pressed="true"] { color: var(--fg); }
 
@@ -138,7 +223,40 @@ const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street an
           </a>
         </div>
       </div>
-      <p class="corner clock" aria-live="off"><i aria-hidden="true"></i><span id="clock"></span></p>
+      <div class="corner clock">
+        <button class="sky-btn" id="clock-btn" type="button" aria-expanded="false" aria-controls="time-panel" aria-label="Time in Tokyo. Change the time of day and season">
+          <span class="disc" aria-hidden="true">
+            <svg data-sky="day" viewBox="0 0 16 16"><g class="rays" stroke="#e9a23b" stroke-width="1.4" stroke-linecap="round">{[0, 45, 90, 135, 180, 225, 270, 315].map((a) => <line x1={8 + 5 * Math.cos((a * Math.PI) / 180)} y1={8 + 5 * Math.sin((a * Math.PI) / 180)} x2={8 + 6.8 * Math.cos((a * Math.PI) / 180)} y2={8 + 6.8 * Math.sin((a * Math.PI) / 180)} />)}</g><circle cx="8" cy="8" r="3.2" fill="#f2b13e" /></svg>
+            <svg data-sky="low" viewBox="0 0 16 16"><path d="M3.5 11a4.5 4.5 0 0 1 9 0z" fill="#ef8f4a" /><g class="twinkle" stroke="#ef8f4a" stroke-width="1.3" stroke-linecap="round"><path d="M8 3.2v1.4M2.9 5.6l1 1M13.1 5.6l-1 1" /></g><path d="M1.5 11.5h13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>
+            <svg data-sky="night" viewBox="0 0 16 16"><path d="M10.8 2.2a6 6 0 1 0 3 9.6A5 5 0 0 1 10.8 2.2z" fill="#c7b46a" /><circle class="twinkle" cx="4" cy="4" r=".8" fill="currentColor" /><circle class="twinkle" cx="6.5" cy="1.8" r=".55" fill="currentColor" /></svg>
+          </span>
+          <span id="clock"></span>
+          <svg class="chev" viewBox="0 0 8 8" aria-hidden="true"><path d="M1 2.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </button>
+        <div class="time-panel" id="time-panel" hidden>
+          <p>time of day <output id="time-val" for="time-range"></output></p>
+          <div class="time-row">
+            <input type="range" id="time-range" min="0" max="1435" step="5" aria-label="Time of day in Tokyo" />
+            <button type="button" class="reset" id="time-now">↺ now</button>
+          </div>
+          <p>season <output id="season-val"></output></p>
+          <div class="seasons" role="group" aria-label="Season">
+            <button type="button" data-v="" aria-label="Season now" title="now">auto</button>
+            <button type="button" data-v="4" aria-label="Spring" title="spring">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><g fill="#f29ab3">{[0, 72, 144, 216, 288].map((a) => <circle cx={8 + 4 * Math.sin((a * Math.PI) / 180)} cy={8.4 - 4 * Math.cos((a * Math.PI) / 180)} r="3.1" />)}</g><circle cx="8" cy="8.4" r="1.7" fill="#ffd36b" /></svg>
+            </button>
+            <button type="button" data-v="8" aria-label="Summer" title="summer">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><g stroke="#f2a93b" stroke-width="1.4" stroke-linecap="round">{[0, 45, 90, 135, 180, 225, 270, 315].map((a) => <line x1={8 + 5.2 * Math.cos((a * Math.PI) / 180)} y1={8 + 5.2 * Math.sin((a * Math.PI) / 180)} x2={8 + 6.8 * Math.cos((a * Math.PI) / 180)} y2={8 + 6.8 * Math.sin((a * Math.PI) / 180)} />)}</g><circle cx="8" cy="8" r="3.4" fill="#f6b73c" /></svg>
+            </button>
+            <button type="button" data-v="11" aria-label="Autumn" title="autumn">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="#e2622b" d="M8 1l1.5 3.4L13 3.5l-1.4 3.4L15 8l-3.4 1.4 1 2.6-3.6-1.1-.2 4.1H7.2l-.2-4.1L3.4 12l1-2.6L1 8l3.4-1.1L3 3.5l3.5.9z" /></svg>
+            </button>
+            <button type="button" data-v="1" aria-label="Winter" title="winter">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><g stroke="#7fb3e3" stroke-width="1.3" stroke-linecap="round" fill="none">{[0, 60, 120].map((a) => <g transform={`rotate(${a} 8 8)`}><path d="M8 1.5v13" /><path d="M6.2 3.2L8 4.8l1.8-1.6M6.2 12.8L8 11.2l1.8 1.6" /></g>)}</g></svg>
+            </button>
+          </div>
+        </div>
+      </div>
       <button class="corner sound" id="sound" type="button" aria-pressed="false">sound off</button>
       <nav class="links" aria-label="Portfolios">
         <a id="l-dev" class="on" href={SITES.dev.url}>{SITES.dev.host} ↗</a>
@@ -149,18 +267,96 @@ const description = 'Rizky "Airu" Khairullah. Backend engineer by day, street an
     <script>
       import { CLOCK } from '../config';
       import { unlockAudio, play } from '../lib/sfx';
+      import { phaseOf, seasonOf } from '../lib/scene';
 
-      // ---- clock: the time where Airu is, and whether Airu is likely awake ----
+      // ---- clock: the time where Airu is, the city and the season (both follow the picker) ----
       const root = document.documentElement;
       const clockEl = document.getElementById('clock')!;
       const fmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: CLOCK.timeZone });
       const tick = () => {
         let time = fmt.format(new Date());
-        if (root.dataset.hour) time = root.dataset.hour.padStart(2, '0') + time.slice(2); // ?hour= preview
-        clockEl.textContent = `${time} ${CLOCK.label} · ${root.classList.contains('asleep') ? 'asleep' : 'awake'}`;
+        if (pick.minutes !== null) time = hhmm(pick.minutes); // a picked time of day
+        clockEl.textContent = `${time} ${CLOCK.city} · ${seasonOf(pick.month ? +pick.month : realMonth())}`;
       };
-      tick();
-      setInterval(tick, 20_000);
+
+      // ---- time / season picker: the visitor can see the card at another hour or season ----
+      const inside = (h: number, [a, b]: readonly number[]) => (a > b ? h >= a || h < b : h >= a && h < b);
+      const realMinutes = () => {
+        const [h, m] = fmt.format(new Date()).split(':').map(Number);
+        return h * 60 + m;
+      };
+      const hhmm = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+      // null / '' = now; ?hour= and ?month= in the URL start the page at a picked time
+      const pick: { minutes: number | null; month: string } = {
+        minutes: root.dataset.hour ? +root.dataset.hour * 60 : null,
+        month: root.dataset.month || '',
+      };
+      const btn = document.getElementById('clock-btn')!;
+      const panel = document.getElementById('time-panel')!;
+      const range = document.getElementById('time-range') as HTMLInputElement;
+      const timeVal = document.getElementById('time-val')!;
+      const nowBtn = document.getElementById('time-now')!;
+      const chips = panel.querySelectorAll<HTMLButtonElement>('.seasons button');
+      const seasonVal = document.getElementById('season-val')!;
+      const realMonth = () => +new Intl.DateTimeFormat('en-GB', { month: 'numeric', timeZone: CLOCK.timeZone }).format(new Date());
+      let shown = ''; // the hour and month the card was last drawn for
+
+      function apply(announce: boolean) {
+        const minutes = pick.minutes ?? realMinutes();
+        const h = Math.floor(minutes / 60);
+        if (pick.minutes !== null) root.dataset.hour = String(h);
+        else delete root.dataset.hour;
+        if (pick.month) root.dataset.month = pick.month;
+        else delete root.dataset.month;
+        root.classList.toggle('night', inside(h, CLOCK.night));
+        root.classList.toggle('torch', inside(h, CLOCK.torch));
+        range.value = String(minutes);
+        timeVal.textContent = hhmm(minutes);
+        nowBtn.setAttribute('aria-pressed', String(pick.minutes === null));
+        chips.forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.v === pick.month)));
+        seasonVal.textContent = pick.month ? seasonOf(+pick.month) : `${seasonOf(realMonth())} · now`;
+        const phase = phaseOf(h);
+        btn.dataset.now = phase === 'night' ? 'night' : phase === 'day' || phase === 'morning' ? 'day' : 'low';
+        tick();
+        // the street only changes by the hour, so only redraw the card when the hour or month does
+        const key = `${h}/${pick.month}`;
+        if (announce && key !== shown) window.dispatchEvent(new CustomEvent('lanyard:time'));
+        shown = key;
+      }
+      apply(false);
+      range.addEventListener('input', () => {
+        pick.minutes = +range.value;
+        apply(true);
+      });
+      nowBtn.addEventListener('click', () => {
+        pick.minutes = null;
+        apply(true);
+      });
+      // keep up with the real clock: the time shown moves on, and when the hour turns the sky and
+      // lights follow (apply only redraws the card when the hour actually changed)
+      setInterval(() => apply(pick.minutes === null), 20_000);
+
+      const open = (on: boolean) => {
+        panel.hidden = !on;
+        btn.setAttribute('aria-expanded', String(on));
+      };
+      btn.addEventListener('click', () => open(panel.hidden));
+      chips.forEach((c) =>
+        c.addEventListener('click', () => {
+          if (pick.month === c.dataset.v) return;
+          pick.month = c.dataset.v!;
+          apply(true);
+        }),
+      );
+      document.addEventListener('pointerdown', (e) => {
+        if (!panel.hidden && !(e.target as Element).closest('.clock')) open(false);
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !panel.hidden) {
+          open(false);
+          btn.focus();
+        }
+      });
 
       // ---- sound switch (off by default, remembered per visitor) ----
       const soundBtn = document.getElementById('sound')!;

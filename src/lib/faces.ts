@@ -1,5 +1,18 @@
 import * as THREE from 'three';
-import { PHOTOS, PLAYER_SPRITE, SITES } from '../config';
+import { CLOCK, PHOTOS, PLAYER_SPRITE, SITES } from '../config';
+import { drawTokyo } from './scene';
+
+/**
+ * Hour and month where Airu is, unless the visitor picked another time of day or season
+ * (the corner picker, or ?hour=22&month=4); the page keeps that choice on <html data-hour data-month>.
+ */
+export function ownerTime() {
+  const parts = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', month: 'numeric', hourCycle: 'h23', timeZone: CLOCK.timeZone })
+    .formatToParts(new Date());
+  const get = (t: string) => +(parts.find((p) => p.type === t)?.value ?? 0);
+  const { hour, month } = document.documentElement.dataset;
+  return { hour: hour ? +hour : get('hour'), month: month ? +month : get('month') };
+}
 
 // Card faces are drawn in "card pixels" (212 x 316, the whole card, edge to edge)
 // and rendered at 1024px wide for a crisp texture.
@@ -10,6 +23,9 @@ const S = TW / PX;
 const TH = Math.round(PY * S);
 
 export const FACE_ASPECT = PX / PY;
+
+/** Where the sprite's window sits on the engineer face, in card pixels (PX x PY). */
+export const PORTRAIT = { x: 16, y: 44, w: 72, h: 92, px: PX, py: PY };
 
 const C = {
   navy: '#0f172a',
@@ -93,23 +109,10 @@ function portrait(g: CanvasRenderingContext2D, photo: Photo, sprite: HTMLImageEl
   g.clip();
   if (photo) drawPhoto(g, photo, x, y, w, h);
   else {
-    g.fillStyle = '#fdf3d6';
-    g.fillRect(x, y, w, h);
-    const floor = y + h - Math.max(14, h * 0.2);
-    for (let fx = x; fx < x + w; fx += 8) {
-      for (let fy = floor; fy < y + h; fy += 8) {
-        g.fillStyle = ((fx - x) / 8 + (fy - floor) / 8) % 2 ? '#e2e8f0' : '#f1f5f9';
-        g.fillRect(fx, fy, 8, 8);
-      }
-    }
-    g.fillStyle = C.navy;
-    g.fillRect(x, floor - 1, w, 1.2);
-    g.fillStyle = '#bfdbfe';
-    g.fillRect(x + 8, y + 10, 16, 12);
-    g.strokeStyle = C.navy;
-    g.lineWidth = 1;
-    g.strokeRect(x + 8.5, y + 10.5, 15, 11);
-    g.beginPath(); g.moveTo(x + 16, y + 10.5); g.lineTo(x + 16, y + 21.5); g.stroke();
+    // outside on a Tokyo street, at Airu's hour and season
+    const floor = Math.round(y + h - Math.max(14, h * 0.2));
+    const { hour, month } = ownerTime();
+    drawTokyo(g, x, y, w, h, floor, hour, month);
     if (sprite) {
       // `k` = the character's height as a share of the window
       const sh = h * k, sw = (sprite.width / sprite.height) * sh;
@@ -164,8 +167,8 @@ function drawDev(photo: Photo, sprite: HTMLImageElement | null) {
   spaced(g, 'PLAYER_1.EXE', R, 20, 1.2, 'right');
 
   // portrait and name, centred on each other
-  portrait(g, photo, sprite, M, 44, 72, 92, 0.8);
-  const nx = M + 72 + 14;
+  portrait(g, photo, sprite, PORTRAIT.x, PORTRAIT.y, PORTRAIT.w, PORTRAIT.h, 0.8);
+  const nx = PORTRAIT.x + PORTRAIT.w + 14;
   g.fillStyle = C.navy;
   g.font = `800 14px ${MONO}`;
   spaced(g, FIRST, nx, 80, 0.4);
@@ -424,13 +427,24 @@ export type CardTextures = {
   strap: StrapTexture;
 };
 
-export async function makeTextures(): Promise<CardTextures> {
-  await Promise.all(
+// fonts and pictures load once; faces can then be redrawn (e.g. the engineer side when the time changes)
+let assets: Promise<[Photo, Photo, HTMLImageElement | null]> | null = null;
+function loadAssets() {
+  return (assets ??= Promise.all(
     [`800 16px ${MONO}`, `500 16px ${MONO}`, `400 48px ${SERIF}`, `italic 400 16px ${SERIF}`, `italic 600 16px ${SERIF}`, `600 16px ${MONO}`, `700 16px ${MONO}`, `400 8px ${SANS}`, `500 8px ${SANS}`].map((f) =>
       document.fonts.load(f).catch(() => undefined),
     ),
-  );
-  const [pd, pf, sprite] = await Promise.all([loadPhoto(PHOTOS.dev), loadPhoto(PHOTOS.frame), loadImage(PLAYER_SPRITE)]);
+  ).then(() => Promise.all([loadPhoto(PHOTOS.dev), loadPhoto(PHOTOS.frame), loadImage(PLAYER_SPRITE)])));
+}
+
+/** The engineer side again, for the current (or picked) time and season. */
+export async function makeDevTexture() {
+  const [pd, , sprite] = await loadAssets();
+  return toTexture(drawDev(pd, sprite));
+}
+
+export async function makeTextures(): Promise<CardTextures> {
+  const [pd, pf, sprite] = await loadAssets();
   const st = drawStrap();
   return {
     dev: toTexture(drawDev(pd, sprite)),

@@ -10,7 +10,7 @@ export const SITES = {
     host: 'dev.byairu.com',
     // the essentials, from dev.byairu.com
     experience: '3+ years',
-    location: 'Yokohama, Japan',
+    location: 'Tokyo, Japan',
     stack: ['Python', 'Django', 'FastAPI', 'TypeScript', 'Vue', 'Docker'],
   },
   frame: {
@@ -58,13 +58,14 @@ export const CARD_FINISH: 'matte' | 'glossy' | 'holo' = 'glossy';
 
 /**
  * Your clock. The page reads the time where you are (not the visitor's):
- * night  -> the lights go down and the cursor becomes a flashlight, [from, to) in hours
- * asleep -> the status in the corner says you are asleep
- * Preview any hour with ?hour=22 in the URL.
+ * night  -> the page goes dark; the card stays lit as usual, [from, to) in hours
+ * torch  -> deep night: the room lights go off and the cursor becomes a flashlight
+ * The street behind the sprite on the engineer side follows the same clock (sky, lights) and month (season).
+ * Preview any hour with ?hour=22 and any month with ?month=4 in the URL.
  */
 export const CLOCK = {
   timeZone: 'Asia/Tokyo',
-  label: 'JST',
-  night: [19, 6] as [number, number],
-  asleep: [1, 7] as [number, number],
+  city: 'Tokyo', // shown next to the time in the corner
+  night: [20, 6] as [number, number],
+  torch: [0, 4] as [number, number],
 };
