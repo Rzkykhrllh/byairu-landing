@@ -11,7 +11,7 @@ export const SITES = {
     // the essentials, from dev.byairu.com
     experience: '3+ years',
     location: 'Tokyo, Japan',
-    stack: ['Python', 'Django', 'FastAPI', 'TypeScript', 'Vue', 'Docker'],
+    stack: ['TypeScript', 'Next.js', 'Express.js', 'Docker', 'Grafana'],
   },
   frame: {
     name: 'Airu.',

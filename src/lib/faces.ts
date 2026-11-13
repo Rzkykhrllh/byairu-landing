@@ -295,8 +295,8 @@ function drawFrame(photo: Photo) {
       g.fillStyle = lift;
       g.fillRect(0, 0, PX, ph);
     }
-    // soft monochrome: a hint of warmth and gentle contrast, like a print rather than a hard B&W
-    if (photo.mono) g.filter = 'grayscale(1) sepia(.14) contrast(.97) brightness(1.03)';
+    // Neutral monochrome with gentle print-like contrast.
+    if (photo.mono) g.filter = 'grayscale(1) contrast(.97) brightness(1.03)';
     if (photo.cutout) {
       // The figure keeps its size and slides sideways so the head (focus x) sits on the card's
       // centre line, under the strap. Where the source photo's own edge (a cut-off arm) lands inside
