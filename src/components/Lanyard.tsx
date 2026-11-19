@@ -33,7 +33,7 @@ const ROPE_POINTS = 4; // free points along the strap; the rope refs and joints 
 const SEG = STRAP_LEN / ROPE_POINTS; // max length between rope points
 const STRAP_W = 0.62;
 const STRAP_SEGS = 48; // slices along the strap ribbon
-const STRAP_STRETCH = 0.15; // how far dragging can stretch the strap: 0 = not at all, 0.15 = 15% longer
+const STRAP_STRETCH = 0.06; // how far dragging can stretch the strap: 0 = not at all, 0.15 = 15% longer
 const CLAMP_Y = CARD_H / 2 + 0.34; // clamp centre above card centre
 const ANCHOR_Y = CLAMP_Y; // the strap ends inside the clamp, so the clamp hides its end
 
@@ -41,12 +41,18 @@ const ANCHOR_Y = CLAMP_Y; // the strap ends inside the clamp, so the clamp hides
 // Gravity does the swinging; the only extra force is a torsion spring that turns the card to the
 // chosen side (the strap's twist). It runs once per physics step, so it feels the same at 60 and 120Hz.
 const GRAVITY = -40;
-const STRAP_DAMP = 2;
+const STRAP_DAMP = 0.8; // air drag on the strap points; higher makes the strap trail behind the card
+const STRAP_BEND = 60; // bending stiffness: pulls the strap points back onto the straight line, so it can't wiggle into an S
+const STRAP_BEND_DAMP = 10; // 1/s, stops that pull from wobbling
+const STRAP_EXIT = 0.18; // how far the strap runs straight out of the clamp before it may bend
+const STRAP_EXIT_LOCK = 0.5; // 1 = leaves exactly along the card's up axis (can kink into an S), 0 = straight at the strap
+const STRAP_DENSITY = 8; // weight of each strap point; too light vs the card and the joints stretch like rubber
 const CARD_LIN_DAMP = 0.6;
 const CARD_ANG_DAMP = 1.4;
 const TURN_STIFF = 16.8; // torsion spring, rad/s² per rad of error
 const TURN_DAMP = 6; // 1/s, keeps the turn from overshooting
 const THROW_MAX = 18; // cap on release speed, world units/s
+const SWING_LIFT = 2.6; // highest a throw can swing the card above its resting place, so it never flies off the top of the screen
 const PEEKS = [3500, 12000]; // ms after load: until the first flip, the card turns a little at these times
 const DYNAMIC = 0; // RigidBodyType.Dynamic in Rapier
 
@@ -141,7 +147,7 @@ export default function Lanyard() {
       <Wall key={clock} night={night} />
       {/* Physics steps in its own loop and only asks for a new frame while something moves,
           so a card at rest costs nothing. Extra solver iterations keep the rope from stretching. */}
-      <Physics gravity={[0, GRAVITY, 0]} timeStep={1 / 60} numSolverIterations={8} updateLoop="independent">
+      <Physics gravity={[0, GRAVITY, 0]} timeStep={1 / 60} numSolverIterations={8} numInternalPgsIterations={4} updateLoop="independent">
         <Badge tex={tex} night={night} winter={winter} />
       </Physics>
       <Environment resolution={256} environmentIntensity={night ? 0.3 : 1}>
@@ -181,7 +187,7 @@ function Responsive() {
 
 // ---- light, shadow and shine ----
 const WALL_Z = -1.2; // the page is a wall just behind the card; its shadow falls here
-const NIGHT_AMBIENT = 0.25; // share of the daytime room light left at night
+const NIGHT_AMBIENT = 0.45; // share of the daytime room light left at night: enough that the card stays faintly visible outside the torch
 
 /** The page sets <html class="torch"> in the small hours, from your clock (see CLOCK in config). */
 const isTorch = () => document.documentElement.classList.contains('torch');
@@ -250,8 +256,8 @@ function Flashlight() {
       <spotLight
         ref={light}
         target={tmp.target}
-        angle={0.3}
-        penumbra={0.85}
+        angle={0.45}
+        penumbra={1}
         decay={0}
         intensity={Math.PI * 0.7}
         color="#fff3dc"
@@ -279,12 +285,13 @@ function Wall({ night }: { night: boolean }) {
   // on a dark page (dark mode, or evening where Airu is) the shadow needs more weight to show
   const dark = useMemo(() => matchMedia('(prefers-color-scheme: dark)').matches || document.documentElement.classList.contains('night'), []);
   return (
-    <mesh position={[0, 0, WALL_Z]} receiveShadow raycast={() => null}>
+    // drawn first and never writes depth: a card swung back past the wall still shows in full, not cut off
+    <mesh position={[0, 0, WALL_Z]} receiveShadow raycast={() => null} renderOrder={-1}>
       <planeGeometry args={[300, 300]} />
       {color ? (
-        <meshStandardMaterial color={color} roughness={1} metalness={0} envMapIntensity={0} />
+        <meshStandardMaterial color={color} roughness={1} metalness={0} envMapIntensity={0} depthWrite={false} />
       ) : (
-        <shadowMaterial transparent opacity={dark ? 0.32 : 0.13} />
+        <shadowMaterial transparent opacity={dark ? 0.32 : 0.13} depthWrite={false} />
       )}
     </mesh>
   );
@@ -516,7 +523,7 @@ function smooth(ref: Ref, delta: number) {
   if (!body.lerped) body.lerped = new THREE.Vector3().copy(t);
   const d = Math.max(0.1, Math.min(1, body.lerped.distanceTo(t)));
   // clamp so a slow frame can never overshoot and blow the curve up
-  body.lerped.lerp(t, Math.min(1, delta * (25 + d * 60)));
+  body.lerped.lerp(t, Math.min(1, delta * (50 + d * 120)));
   return body.lerped;
 }
 
@@ -551,6 +558,10 @@ function Badge({ tex, night, winter }: { tex: CardTextures; night: boolean; wint
       ray: new THREE.Raycaster(),
       plane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
       hit: new THREE.Vector3(),
+      clamp: new THREE.Vector3(),
+      dir: new THREE.Vector3(),
+      off: new THREE.Vector3(),
+      vrel: new THREE.Vector3(),
     }),
     [],
   );
@@ -654,6 +665,10 @@ function Badge({ tex, night, winter }: { tex: CardTextures; night: boolean; wint
         const dt = Math.max((b.t - a.t) / 1000, 1 / 120);
         const v = new THREE.Vector2((b.x - a.x) / dt, (b.y - a.y) / dt);
         if (v.length() > THROW_MAX) v.setLength(THROW_MAX);
+        // energy cap: a swing rises v²/2g, so limit the speed to what reaches SWING_LIFT above rest from here
+        const room = REST_Y + SWING_LIFT - b.y;
+        const vMax = Math.sqrt(Math.max(0, 2 * -GRAVITY * room));
+        if (v.length() > vMax) v.setLength(vMax);
         throwVel.current = { x: v.x, y: v.y };
         if (v.length() > 4) play('whoosh', v.length() / THROW_MAX);
       }
@@ -688,6 +703,36 @@ function Badge({ tex, night, winter }: { tex: CardTextures; night: boolean; wint
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     prevYaw.current = e.y;
     yawU.current += dy;
+
+    // Strap stiffness: a real lanyard strap is stiff fabric, not a chain. Pull each strap point
+    // towards its spot on the straight line top -> clamp (sideways only, the joints handle length).
+    {
+      const { clamp, dir, off, vrel } = tmp;
+      const cp = c.translation();
+      const cv = c.linvel();
+      up.set(0, ANCHOR_Y, 0).applyQuaternion(q);
+      clamp.set(cp.x + up.x, cp.y + up.y, cp.z + up.z);
+      const tp = top.current.translation();
+      dir.set(clamp.x - tp.x, clamp.y - tp.y, clamp.z - tp.z);
+      const span = dir.length();
+      if (span > 1e-4) {
+        dir.divideScalar(span);
+        for (let i = 0; i < ROPE_POINTS - 1; i++) {
+          const b = rope[i].current;
+          if (!b) continue;
+          const f = (i + 1) / ROPE_POINTS;
+          const p = b.translation();
+          const v = b.linvel();
+          off.set(tp.x + (clamp.x - tp.x) * f - p.x, tp.y + (clamp.y - tp.y) * f - p.y, tp.z + (clamp.z - tp.z) * f - p.z);
+          off.addScaledVector(dir, -off.dot(dir));
+          vrel.set(v.x - cv.x * f, v.y - cv.y * f, v.z - cv.z * f);
+          vrel.addScaledVector(dir, -vrel.dot(dir));
+          if (off.lengthSq() < 1e-6 && vrel.lengthSq() < 1e-4) continue; // settled: let it sleep
+          const k = STRAP_BEND * dt, d = STRAP_BEND_DAMP * dt;
+          b.setLinvel({ x: v.x + off.x * k - vrel.x * d, y: v.y + off.y * k - vrel.y * d, z: v.z + off.z * k - vrel.z * d }, true);
+        }
+      }
+    }
 
     if (enter.current.on) {
       if (dragRef.current) {
@@ -729,7 +774,14 @@ function Badge({ tex, night, winter }: { tex: CardTextures; night: boolean; wint
     if (c.bodyType() !== DYNAMIC) return; // just released: the body switches back next render
 
     if (throwVel.current) {
-      c.setLinvel({ x: throwVel.current.x, y: throwVel.current.y, z: 0 }, true);
+      const tv = throwVel.current;
+      c.setLinvel({ x: tv.x, y: tv.y, z: 0 }, true);
+      // the strap points were yanked around by the drag; give them the same swing (less towards the
+      // fixed top), or their leftover speed whips the card further than the throw allows
+      rope.forEach((r, i) => {
+        const f = (i + 1) / ROPE_POINTS;
+        r.current?.setLinvel({ x: tv.x * f, y: tv.y * f, z: 0 }, true);
+      });
       throwVel.current = null;
     }
 
@@ -773,8 +825,12 @@ function Badge({ tex, night, winter }: { tex: CardTextures; night: boolean; wint
     const cp = c.translation();
     tmp.up.set(0, 1, 0).applyQuaternion(tmp.q);
     curve.points[0].set(cp.x, cp.y, cp.z).addScaledVector(tmp.up, ANCHOR_Y);
-    curve.points[1].copy(curve.points[0]).addScaledVector(tmp.up, 0.3);
     for (let i = 0; i < ROPE_POINTS - 1; i++) curve.points[2 + i].copy(smooth(rope[ROPE_POINTS - 2 - i], delta));
+    // The strap leaves the clamp between the card's up axis and the way the strap actually runs, so a
+    // tilted card bends it in one soft curve instead of kinking it back into an S.
+    tmp.dir.subVectors(curve.points[2], curve.points[0]).normalize();
+    tmp.dir.lerp(tmp.up, STRAP_EXIT_LOCK).normalize();
+    curve.points[1].copy(curve.points[0]).addScaledVector(tmp.dir, STRAP_EXIT);
     curve.points[ROPE_POINTS + 1].copy(top.current.translation() as THREE.Vector3);
     curve.updateArcLengths(); // three caches arc lengths; stale ones skew the strap texture and twist
     ribbon.update(curve, yawU.current, tmp.q);
@@ -806,7 +862,7 @@ function Badge({ tex, night, winter }: { tex: CardTextures; night: boolean; wint
         <RigidBody ref={top} {...strapBody} type="fixed" />
         {rope.map((ref, i) => (
           <RigidBody key={i} ref={ref} {...strapBody} position={ropeStart(i)}>
-            <BallCollider args={[0.1]} />
+            <BallCollider args={[0.1]} density={STRAP_DENSITY} />
           </RigidBody>
         ))}
 
